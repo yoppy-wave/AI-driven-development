@@ -1,0 +1,59 @@
+{
+  "name": "AI-driven development",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "..",
+    "args": {
+      "PYTHON_VERSION": "3.12"
+    }
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/node:2": {
+      "version": "24",
+      "pnpmVersion": "none"
+    }
+  },
+  "remoteUser": "vscode",
+  "updateRemoteUserUID": true,
+  "init": true,
+  "postCreateCommand": {
+    "python-venv": ["python3", "-m", "venv", ".venv"],
+    "git-workspace": [
+      "git", "config", "--global", "--fixed-value", "--replace-all",
+      "safe.directory", "${containerWorkspaceFolder}", "${containerWorkspaceFolder}"
+    ]
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "saoudrizwan.claude-dev",
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-python.debugpy",
+        "charliermarsh.ruff",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "${containerWorkspaceFolder}/.venv/bin/python",
+        "python.terminal.activateEnvironment": true,
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "files.eol": "\n",
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.formatOnSave": true
+        },
+        "[javascript][javascriptreact][typescript][typescriptreact][json][jsonc]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode",
+          "editor.formatOnSave": true
+        }
+      }
+    }
+  },
+  "forwardPorts": [3000, 5173, 8000],
+  "portsAttributes": {
+    "3000": { "label": "Web app", "onAutoForward": "notify" },
+    "5173": { "label": "Vite", "onAutoForward": "notify" },
+    "8000": { "label": "Python API", "onAutoForward": "notify" }
+  }
+}
