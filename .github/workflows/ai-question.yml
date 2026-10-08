@@ -40,35 +40,42 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Install GitHub Copilot CLI
-        run: npm install --global @github/copilot
+      - name: Install Cline CLI
+        run: npm install --global cline@3.0.70
 
       - name: Prepare the question
         env:
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
-        run: python .github/scripts/ai_question.py prepare
+        run: |
+          python .github/scripts/ai_question.py prepare
+          mkdir -p "$HOME/.cline/hooks"
+          cp .github/scripts/ai_question.py "$HOME/.cline/hooks/PreToolUse.py"
+          chmod +x "$HOME/.cline/hooks/PreToolUse.py"
 
       - name: Inspect source and draft an answer
         env:
-          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
-          COPILOT_MODEL: ${{ vars.COPILOT_MODEL }}
-          COPILOT_AUTO_UPDATE: 'false'
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CLINE_MODEL: ${{ vars.CLINE_MODEL || 'gpt-5.4' }}
+          CLINE_LOG_ENABLED: '0'
         run: |
-          if [[ -z "$COPILOT_GITHUB_TOKEN" ]]; then
-            echo '::error::Repository secret COPILOT_GITHUB_TOKEN is not configured.'
+          if [[ -z "$OPENAI_API_KEY" ]]; then
+            echo '::error::Repository secret OPENAI_API_KEY is not configured.'
             exit 1
           fi
 
-          timeout --signal=TERM 1200s copilot \
-            -p "$(cat "$RUNNER_TEMP/ai-question-prompt.txt")" -s \
-            --available-tools='view,grep,glob' \
-            --allow-tool=read --deny-tool=write --no-ask-user \
-            --secret-env-vars=COPILOT_GITHUB_TOKEN \
-            > "$RUNNER_TEMP/ai-question-output.txt"
+          if ! timeout --signal=TERM 1250s cline --json --plan --auto-approve true \
+            --timeout 1200 --provider openai --model "$CLINE_MODEL" \
+            --cwd "$GITHUB_WORKSPACE" \
+            < "$RUNNER_TEMP/ai-question-prompt.txt" \
+            > "$RUNNER_TEMP/ai-question-events.ndjson" \
+            2> "$RUNNER_TEMP/ai-question-stderr.txt"; then
+            echo '::error::Cline failed; no answer was posted.'
+            exit 1
+          fi
 
           if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
-            echo '::error::Copilot changed files in the checkout; the answer will not be posted.'
+            echo '::error::Cline changed files in the checkout; the answer will not be posted.'
             exit 1
           fi
 

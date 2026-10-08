@@ -185,21 +185,23 @@ Dockerfileだけを `docker build` した場合、Node.js Feature・拡張機能
 
 ## issueの質問にAIで回答する
 
-[`.github/workflows/ai-question.yml`](.github/workflows/ai-question.yml) は、issueに `ai-question` ラベルを付けたときに起動します。GitHub ActionsのUbuntu 24.04上でPython 3.12、Node.js 24、.NET 10、GitHub Copilot CLIを用意し、issueのタイトルと本文を質問として渡します。Copilotはその時点の既定ブランチのソースを調べ、回答を同じissueへコメントします。調査用の読み取りツールだけを許可し、作業ツリーが変更された場合は投稿を停止します。
+ChatGPT Pro認証を使ってCline CLIをGitHub-hosted Runnerで動かす検証結果は [認証PoCレポート](docs/cline-pro-auth-poc.md) に記載しています。Runner間での認証更新を安全に維持する方式が確認できなかったため、以下のActionsワークフローはOpenAI APIキー方式です。
 
-利用前に、GitHubアカウントで **Copilot Requests** 権限を持つfine-grained personal access tokenを作成し、リポジトリの **Settings → Secrets and variables → Actions** にRepository secret `COPILOT_GITHUB_TOKEN` として登録してください。OpenAI APIキーは不要です。このトークンはCopilot CLIの認証専用です。リポジトリの読み書きやPR作成に使う権限は付けず、対象リポジトリだけに制限してください。[GitHub公式の認証手順](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/authenticate-copilot-cli)を参照できます。使用モデルを変える場合はRepository variable `COPILOT_MODEL` にCopilot CLIで利用できるモデルIDを設定します。未設定時はCopilot CLIの既定モデルを使います。トークンをファイルへ書いたり、Gitへコミットしたりしないでください。
+[`.github/workflows/ai-question.yml`](.github/workflows/ai-question.yml) は、issueに `ai-question` ラベルを付けたときに起動します。GitHub ActionsのUbuntu 24.04上でPython 3.12、Node.js 24、.NET 10、Cline CLIを用意し、issueのタイトルと本文を質問として渡します。Clineはその時点のソースを調べ、回答を同じissueへコメントします。読み取り以外のツールをフックで止め、作業ツリーが変更された場合も投稿を停止します。
 
-ワークフローを既定ブランチに反映し、GitHub上に `ai-question` という名前のラベルを作成してから、質問したいissueへ付けます。既にラベルが付いているissueでは、一度外して付け直すと再実行できます。現在のリポジトリにアプリケーションコードがない質問では、その旨を回答する設定です。Copilot CLIの処理が失敗した場合、回答コメントは投稿されません。
+利用前に[OpenAI Platform](https://platform.openai.com/api-keys)でAPIキーを作成し、リポジトリの **Settings → Secrets and variables → Actions** にRepository secret `OPENAI_API_KEY` として登録してください。ChatGPT Proとは別のAPI利用料金が発生します。使用モデルを変える場合はRepository variable `CLINE_MODEL` にOpenAI APIで利用できるモデルIDを設定します。未設定時は `gpt-5.4` を使います。キーをファイルへ書いたり、Gitへコミットしたりしないでください。
+
+ワークフローを既定ブランチに反映し、GitHub上に `ai-question` という名前のラベルを作成してから、質問したいissueへ付けます。既にラベルが付いているissueでは、一度外して付け直すと再実行できます。現在のリポジトリにアプリケーションコードがない質問では、その旨を回答する設定です。Cline CLIの処理が失敗した場合、回答コメントは投稿されません。
 
 ## issueからAIに実装させる
 
-[`.github/workflows/ai-coding.yml`](.github/workflows/ai-coding.yml) は、issueに `ai-coding` ラベルを付けたときに起動します。Copilot CLIが既存コードとテストを確認して計画を立て、実装と関連チェックを行います。変更があれば `ai-coding/issue-<番号>` ブランチの**ドラフトPR**を作成・更新し、issueをPR本文から参照します。既定ブランチには直接反映しません。変更がない場合はCopilotの報告をissueにコメントします。
+[`.github/workflows/ai-coding.yml`](.github/workflows/ai-coding.yml) は、issueに `ai-coding` ラベルを付けたときに起動します。Cline CLIが既存コードとテストを確認して計画を立て、実装と関連チェックを行います。変更があれば `ai-coding/issue-<番号>` ブランチの**ドラフトPR**を作成・更新し、issueをPR本文から参照します。既定ブランチには直接反映しません。変更がない場合はClineの報告をissueにコメントします。
 
-`ai-question` と同じRepository secret `COPILOT_GITHUB_TOKEN` を使い、Repository variable `COPILOT_MODEL` でモデルを変更できます。Copilot CLIにはPR作成用トークンを渡さず、後続の工程だけがPRを作成します。GitHubの **Settings → Actions → General → Workflow permissions** では、GitHub Actionsによるプルリクエストの作成を許可してください。GitHub上に `ai-coding` ラベルを作成し、ワークフローを既定ブランチへ反映してから利用します。
+`ai-question` と同じRepository secret `OPENAI_API_KEY` を使い、Repository variable `CLINE_MODEL` でモデルを変更できます。Cline CLIにはPR作成用トークンを渡さず、後続の工程だけがPRを作成します。GitHubの **Settings → Actions → General → Workflow permissions** では、GitHub Actionsによるプルリクエストの作成を許可してください。GitHub上に `ai-coding` ラベルを作成し、ワークフローを既定ブランチへ反映してから利用します。
 
 この自動実装では `.github/` 配下の変更はPR化せず、実行を停止します。ワークフローやAI指示ファイル自体の変更は別途レビューして行ってください。
 
-既定の `GITHUB_TOKEN` で作ったPRは、通常の `pull_request` イベントによる別のワークフローを起動しません。PR作成後のCIも自動実行したい場合は、`contents: write` と `pull-requests: write` の権限を持つPersonal Access TokenをRepository secret `AI_CODING_PR_TOKEN` に登録できます。登録しなければ `GITHUB_TOKEN` を使用します。Copilot CLI実行中にはPR作成用トークンを環境変数として渡さず、PRは必ず人が内容を確認してからマージしてください。
+既定の `GITHUB_TOKEN` で作ったPRは、通常の `pull_request` イベントによる別のワークフローを起動しません。PR作成後のCIも自動実行したい場合は、`contents: write` と `pull-requests: write` の権限を持つPersonal Access TokenをRepository secret `AI_CODING_PR_TOKEN` に登録できます。登録しなければ `GITHUB_TOKEN` を使用します。Cline CLI実行中にはPR作成用トークンを渡さず、PRは必ず人が内容を確認してからマージしてください。実装用Clineはコマンドを実行できるため、APIキーはその実行環境から参照可能です。信頼できる担当者だけが `ai-coding` ラベルを付け、APIキーには利用上限を設定してください。
 
 ## 会社・チームで利用する際の検討事項：Squidの通信先許可リスト
 

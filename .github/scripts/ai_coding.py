@@ -1,10 +1,12 @@
-"""Prepare a coding issue for Copilot CLI and turn its result into PR text."""
+"""Prepare a coding issue for Cline CLI and turn its result into PR text."""
 
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
+
+from ai_question import final_text
 
 
 def runner_file(name: str) -> Path:
@@ -48,29 +50,27 @@ def changed_paths() -> list[Path]:
 
 
 def extract() -> None:
-    summary = runner_file("ai-coding-output.txt").read_text(encoding="utf-8").strip()
-    if not summary:
-        raise SystemExit("Copilot returned an empty summary; no pull request was created.")
+    summary = final_text("ai-coding-events.ndjson")
 
-    token = os.environ["COPILOT_GITHUB_TOKEN"]
+    token = os.environ.get("OPENAI_API_KEY")
     if not token or token in summary:
-        raise SystemExit("Copilot output may contain the GitHub token; no pull request was created.")
+        raise SystemExit("The API key is unavailable or appears in the result; no pull request was created.")
     if len(summary.encode("utf-8")) > 58000:
-        raise SystemExit("Copilot summary is too long for a pull request body.")
+        raise SystemExit("Cline summary is too long for a pull request body.")
 
     root = Path.cwd().resolve()
     for path in changed_paths():
         if path.parts and path.parts[0] == ".github":
-            raise SystemExit("Copilot changed .github configuration; no pull request was created.")
+            raise SystemExit("Cline changed .github configuration; no pull request was created.")
         if path.is_symlink() or not path.resolve().is_relative_to(root):
-            raise SystemExit("Copilot changed an unsafe path; no pull request was created.")
+            raise SystemExit("Cline changed an unsafe path; no pull request was created.")
         if path.is_file() and token.encode("utf-8") in path.read_bytes():
-            raise SystemExit("A changed file contains the GitHub token; no pull request was created.")
+            raise SystemExit("A changed file contains the API key; no pull request was created.")
 
     issue_number = os.environ["ISSUE_NUMBER"]
     runner_file("ai-coding-pr-body.md").write_text(
         f"対象issue: #{issue_number}\n\n{summary}\n\n"
-        "---\nGitHub Copilot CLIによる実装案です。内容とテスト結果をレビューしてください。\n",
+        "---\nCline CLIによる実装案です。内容とテスト結果をレビューしてください。\n",
         encoding="utf-8",
     )
     runner_file("ai-coding-no-change.md").write_text(

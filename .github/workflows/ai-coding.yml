@@ -42,8 +42,8 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Install GitHub Copilot CLI
-        run: npm install --global @github/copilot
+      - name: Install Cline CLI
+        run: npm install --global cline@3.0.70
 
       - name: Prepare the implementation request
         env:
@@ -53,30 +53,33 @@ jobs:
         run: |
           python .github/scripts/ai_coding.py prepare
           cp .github/scripts/ai_coding.py "$RUNNER_TEMP/ai-coding-helper.py"
+          cp .github/scripts/ai_question.py "$RUNNER_TEMP/ai_question.py"
 
-      - name: Implement and test with Copilot
+      - name: Implement and test with Cline
         id: coding
         env:
-          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
-          COPILOT_MODEL: ${{ vars.COPILOT_MODEL }}
-          COPILOT_AUTO_UPDATE: 'false'
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CLINE_MODEL: ${{ vars.CLINE_MODEL || 'gpt-5.4' }}
+          CLINE_LOG_ENABLED: '0'
         run: |
-          if [[ -z "$COPILOT_GITHUB_TOKEN" ]]; then
-            echo '::error::Repository secret COPILOT_GITHUB_TOKEN is not configured.'
+          if [[ -z "$OPENAI_API_KEY" ]]; then
+            echo '::error::Repository secret OPENAI_API_KEY is not configured.'
             exit 1
           fi
 
           base_sha="$(git rev-parse HEAD)"
-          timeout --signal=TERM 2700s copilot \
-            -p "$(cat "$RUNNER_TEMP/ai-coding-prompt.txt")" -s \
-            --available-tools='bash,list_bash,read_bash,stop_bash,write_bash,apply_patch,create,edit,view,grep,glob' \
-            --allow-tool='read,write,shell' \
-            --deny-tool='shell(git commit),shell(git push)' \
-            --no-ask-user --secret-env-vars=COPILOT_GITHUB_TOKEN \
-            > "$RUNNER_TEMP/ai-coding-output.txt"
+          if ! timeout --signal=TERM 2750s cline --json --auto-approve true \
+            --timeout 2700 --provider openai --model "$CLINE_MODEL" \
+            --cwd "$GITHUB_WORKSPACE" \
+            < "$RUNNER_TEMP/ai-coding-prompt.txt" \
+            > "$RUNNER_TEMP/ai-coding-events.ndjson" \
+            2> "$RUNNER_TEMP/ai-coding-stderr.txt"; then
+            echo '::error::Cline failed; no pull request was created.'
+            exit 1
+          fi
 
           if [[ "$(git rev-parse HEAD)" != "$base_sha" ]]; then
-            echo '::error::Copilot created a commit; this workflow expects uncommitted changes.'
+            echo '::error::Cline created a commit; this workflow expects uncommitted changes.'
             exit 1
           fi
 
@@ -97,7 +100,7 @@ jobs:
           token: ${{ secrets.AI_CODING_PR_TOKEN || secrets.GITHUB_TOKEN }}
           base: ${{ github.event.repository.default_branch }}
           branch: ai-coding/issue-${{ github.event.issue.number }}
-          commit-message: 'Implement issue #${{ github.event.issue.number }} with Copilot'
+          commit-message: 'Implement issue #${{ github.event.issue.number }} with Cline'
           title: 'AI実装: issue #${{ github.event.issue.number }}'
           body-path: ${{ runner.temp }}/ai-coding-pr-body.md
           draft: true
