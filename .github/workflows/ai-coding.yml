@@ -42,8 +42,8 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Install Cline CLI
-        run: npm install --global cline@3.0.70
+      - name: Install GitHub Copilot CLI
+        run: npm install --global @github/copilot
 
       - name: Prepare the implementation request
         env:
@@ -54,26 +54,29 @@ jobs:
           python .github/scripts/ai_coding.py prepare
           cp .github/scripts/ai_coding.py "$RUNNER_TEMP/ai-coding-helper.py"
 
-      - name: Implement and test with Cline
+      - name: Implement and test with Copilot
         id: coding
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          CLINE_MODEL: ${{ vars.CLINE_MODEL || 'gpt-5.4' }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          COPILOT_MODEL: ${{ vars.COPILOT_MODEL }}
+          COPILOT_AUTO_UPDATE: 'false'
         run: |
-          if [[ -z "$OPENAI_API_KEY" ]]; then
-            echo '::error::Repository secret OPENAI_API_KEY is not configured.'
+          if [[ -z "$COPILOT_GITHUB_TOKEN" ]]; then
+            echo '::error::Repository secret COPILOT_GITHUB_TOKEN is not configured.'
             exit 1
           fi
 
           base_sha="$(git rev-parse HEAD)"
-          cline --json --auto-approve true --timeout 2700 \
-            --provider openai --model "$CLINE_MODEL" --cwd "$GITHUB_WORKSPACE" \
-            '標準入力のissueを調べて実装し、適切なテストを実行してください。' \
-            < "$RUNNER_TEMP/ai-coding-prompt.txt" \
-            > "$RUNNER_TEMP/ai-coding-events.ndjson"
+          timeout --signal=TERM 2700s copilot \
+            -p "$(cat "$RUNNER_TEMP/ai-coding-prompt.txt")" -s \
+            --available-tools='bash,list_bash,read_bash,stop_bash,write_bash,apply_patch,create,edit,view,grep,glob' \
+            --allow-tool='read,write,shell' \
+            --deny-tool='shell(git commit),shell(git push)' \
+            --no-ask-user --secret-env-vars=COPILOT_GITHUB_TOKEN \
+            > "$RUNNER_TEMP/ai-coding-output.txt"
 
           if [[ "$(git rev-parse HEAD)" != "$base_sha" ]]; then
-            echo '::error::Cline created a commit; this workflow expects uncommitted changes.'
+            echo '::error::Copilot created a commit; this workflow expects uncommitted changes.'
             exit 1
           fi
 
@@ -94,7 +97,7 @@ jobs:
           token: ${{ secrets.AI_CODING_PR_TOKEN || secrets.GITHUB_TOKEN }}
           base: ${{ github.event.repository.default_branch }}
           branch: ai-coding/issue-${{ github.event.issue.number }}
-          commit-message: 'Implement issue #${{ github.event.issue.number }} with Cline'
+          commit-message: 'Implement issue #${{ github.event.issue.number }} with Copilot'
           title: 'AI実装: issue #${{ github.event.issue.number }}'
           body-path: ${{ runner.temp }}/ai-coding-pr-body.md
           draft: true
