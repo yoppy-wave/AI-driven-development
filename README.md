@@ -199,7 +199,15 @@ Dockerfileだけを `docker build` した場合、Node.js Feature・拡張機能
 
 この自動実装では `.github/` 配下の変更はPR化せず、実行を停止します。ワークフローやAI指示ファイル自体の変更は別途レビューして行ってください。
 
-既定の `GITHUB_TOKEN` で作ったPRは、通常の `pull_request` イベントによる別のワークフローを起動しません。PR作成後のCIも自動実行したい場合は、`contents: write` と `pull-requests: write` の権限を持つPersonal Access TokenをRepository secret `AI_CODING_PR_TOKEN` に登録できます。登録しなければ `GITHUB_TOKEN` を使用します。Copilot CLI実行中にはPR作成用トークンを環境変数として渡さず、PRは必ず人が内容を確認してからマージしてください。
+既定の `GITHUB_TOKEN` で作ったPRのチェックは、GitHubの設定によって実行承認が必要になります。PR作成後のCIも自動実行したい場合は、`contents: write` と `pull-requests: write` の権限を持つPersonal Access TokenをRepository secret `AI_CODING_PR_TOKEN` に登録できます。登録しなければ `GITHUB_TOKEN` を使用します。Copilot CLI実行中にはPR作成用トークンを環境変数として渡さず、PRは必ず人が内容を確認してからマージしてください。
+
+## PRで既存機能の破壊を検知する
+
+[`.github/workflows/regression.yml`](.github/workflows/regression.yml) は、PRの作成・更新・再オープン時に、提案された変更を既定ブランチへマージした状態でテストします。ドラフトPRも対象です。APIキーなどのSecretsは渡さず、リポジトリは読み取り権限でチェックアウトします。
+
+現在は `.github/scripts/tests/` の既存テストを毎回実行します。今後アプリを追加した場合は、[回帰テスト実行スクリプト](.github/scripts/run_regression.py) がPythonの `pyproject.toml` / `requirements.txt`、TypeScriptの `package.json`、C#の `.csproj` を探し、各プロジェクトのテストを実行します。Pythonは `pytest`、Node.jsは `test` スクリプト（設定があれば `lint` と `typecheck` も）、C#は `dotnet build` と `dotnet test` を使います。Pythonのテストファイル、Node.jsの `test` スクリプト、C#のテストプロジェクトがない場合は失敗させ、テストなしの新機能を見落とさないようにします。Node.jsでは再現可能な依存関係のため、npm・pnpm・Yarnのロックファイルを1つ置いてください。
+
+テストでは、既存の条件・計算・戻り値の破壊、重要な処理の呼び出し削除、複数の入口での判断不一致、APIや型の変更に伴う更新漏れを検知するケースを追加してください。詳しい観点は [共通指示](.github/copilot-instructions.md) と [言語別指示](.github/instructions/) にあります。ワークフローはテストを実行しますが、テストが期待される振る舞いを十分に表しているかはレビューが必要です。DBなどを使う結合テストを追加した際は、必要なサービスと初期データもワークフローに設定してください。
 
 ## 会社・チームで利用する際の検討事項：Squidの通信先許可リスト
 
