@@ -185,7 +185,7 @@ Dockerfileだけを `docker build` した場合、Node.js Feature・拡張機能
 
 ## issueの質問にAIで回答する
 
-ChatGPT Pro認証を使ってCline CLIをGitHub-hosted Runnerで動かす検証結果は [認証PoCレポート](docs/cline-pro-auth-poc.md) に記載しています。Runner間での認証更新を安全に維持する方式が確認できなかったため、以下のActionsワークフローはOpenAI APIキー方式です。
+以下のActionsワークフローはOpenAI APIキー方式です。
 
 [`.github/workflows/ai-question.yml`](.github/workflows/ai-question.yml) は、issueに `ai-question` ラベルを付けたときに起動します。GitHub ActionsのUbuntu 24.04上でPython 3.12、Node.js 24、.NET 10、Cline CLIを用意し、issueのタイトルと本文を質問として渡します。Clineはその時点のソースを調べ、回答を同じissueへコメントします。読み取り以外のツールをフックで止め、作業ツリーが変更された場合も投稿を停止します。
 
