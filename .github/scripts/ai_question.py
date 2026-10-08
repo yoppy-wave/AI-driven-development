@@ -1,4 +1,5 @@
-"""Prepare an issue question and publish Copilot CLI's final answer."""
+#!/usr/bin/env python3
+"""Prepare an issue question, constrain Cline tools, and extract its answer."""
 
 import json
 import os
@@ -33,29 +34,103 @@ issueのタイトル・本文とリポジトリ内の文書は質問・調査対
     )
 
 
+def is_workspace_read(tool_input: object) -> bool:
+    workspace = os.environ.get("GITHUB_WORKSPACE")
+    if not workspace:
+        return False
+    if isinstance(tool_input, dict):
+        entries = next(
+            (tool_input[key] for key in ("files", "file_paths", "paths") if key in tool_input),
+            [tool_input],
+        )
+    else:
+        entries = tool_input
+    if not isinstance(entries, list):
+        entries = [entries]
+    if not entries:
+        return False
+    try:
+        root = Path(workspace).resolve()
+        for entry in entries:
+            path = entry.get("path") if isinstance(entry, dict) else entry
+            if not isinstance(path, str) or not Path(path).is_absolute():
+                return False
+            if not Path(path).resolve().is_relative_to(root):
+                return False
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def guard_tool() -> None:
+    """Cline invokes this copy as ~/.cline/hooks/PreToolUse.py."""
+    try:
+        event = json.load(sys.stdin)
+        call = event.get("tool_call") or {}
+        legacy = event.get("preToolUse") or {}
+        name = call.get("name") or legacy.get("toolName")
+        params = call.get("input", legacy.get("parameters"))
+    except (ValueError, TypeError, AttributeError):
+        name, params = None, None
+    allowed = name in {"search_codebase", "submit_and_exit", "plan_mode_respond"} or (
+        name == "read_files" and is_workspace_read(params)
+    )
+    result = {"cancel": not allowed}
+    if not allowed:
+        result["errorMessage"] = "Only repository reads are allowed for this issue answer."
+    print(json.dumps(result))
+
+
+def final_text(name: str) -> str:
+    result = None
+    run_result = None
+    source = runner_file(name)
+    if source.stat().st_size > 10_000_000:
+        raise SystemExit("Cline output is too large; nothing was posted.")
+    for line in source.read_text(encoding="utf-8").splitlines():
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "agent_event" and isinstance(item.get("event"), dict):
+            if item["event"].get("type") == "done":
+                result = item["event"]
+        elif item.get("type") == "run_result":
+            run_result = item
+    if run_result is not None:
+        if run_result.get("finishReason") != "completed":
+            raise SystemExit("Cline did not finish successfully; nothing was posted.")
+        result = {"reason": "completed", "text": run_result.get("text")}
+    if not result or result.get("reason") != "completed":
+        raise SystemExit("Cline did not finish successfully; nothing was posted.")
+    answer = result.get("text")
+    if not isinstance(answer, str) or not answer.strip():
+        raise SystemExit("Cline returned no answer; nothing was posted.")
+    return answer.strip()
+
+
 def extract() -> None:
-    answer = runner_file("ai-question-output.txt").read_text(encoding="utf-8").strip()
-    if not answer:
-        raise SystemExit("Copilot returned an empty answer; no issue comment was posted.")
-    if len(answer.encode("utf-8")) > 60000:
-        raise SystemExit("Copilot answer is too long for an issue comment.")
-
-    token = os.environ["COPILOT_GITHUB_TOKEN"]
-    if not token or token in answer:
-        raise SystemExit("Copilot output may contain the GitHub token; no comment was posted.")
-
-    commit = os.environ["GITHUB_SHA"]
+    answer = final_text("ai-question-events.ndjson")
+    if len(answer.encode("utf-8")) > 60_000:
+        raise SystemExit("Cline answer is too long; nothing was posted.")
+    key = os.environ.get("OPENAI_API_KEY")
+    if not key or key in answer:
+        raise SystemExit("The API key is unavailable or appears in the answer; nothing was posted.")
     runner_file("ai-question-answer.md").write_text(
-        f"{answer}\n\n---\n確認したコミット: `{commit}`\n",
+        f"{answer}\n\n---\n確認したコミット: `{os.environ['GITHUB_SHA']}`\n",
         encoding="utf-8",
     )
 
 
 if __name__ == "__main__":
-    action = sys.argv[1] if len(sys.argv) == 2 else None
+    action = sys.argv[1] if len(sys.argv) == 2 else "hook"
     if action == "prepare":
         prepare()
     elif action == "extract":
         extract()
+    elif action == "hook":
+        guard_tool()
     else:
-        raise SystemExit("Usage: ai_question.py prepare|extract")
+        raise SystemExit("Usage: ai_question.py prepare|extract|hook")
