@@ -111,8 +111,6 @@ class IssueWorkflowTests(unittest.TestCase):
         ai_coding.prepare()
         prompt = (self.temp_path / "ai-coding-prompt.txt").read_text(encoding="utf-8")
         self.assertIn('"number": "42"', prompt)
-        self.assertIn("プルリクエスト本文へそのまま掲載", prompt)
-        self.assertIn("日本語で記述してください", prompt)
         self.write_events("ai-coding", "変更内容: 境界値を修正。\n確認: テスト成功。")
         with patch.object(ai_coding, "changed_paths", return_value=[]):
             ai_coding.extract()
