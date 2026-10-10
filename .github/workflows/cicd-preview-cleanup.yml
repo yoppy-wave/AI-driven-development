@@ -1,0 +1,54 @@
+name: Clean up preview environment
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: cicd-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  config:
+    runs-on: ubuntu-24.04
+    outputs:
+      preview-enabled: ${{ steps.config.outputs.preview_environment_enabled }}
+      work-directory: ${{ steps.config.outputs.pulumi_work_directory }}
+      backend-url: ${{ steps.config.outputs.pulumi_backend_url }}
+      stack-prefix: ${{ steps.config.outputs.stack_prefix }}
+      worker-prefix: ${{ steps.config.outputs.worker_prefix }}
+    steps:
+      - name: Check out merged pull request base
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Read CI/CD configuration
+        id: config
+        run: python .github/scripts/cicd_config.py github-output >> "$GITHUB_OUTPUT"
+
+  cleanup:
+    if: needs.config.outputs.preview-enabled == 'true'
+    needs: config
+    uses: ./.github/workflows/reusable-cloudflare-worker.yml
+    with:
+      enabled: true
+      operation: destroy
+      work-directory: ${{ needs.config.outputs.work-directory }}
+      stack-name: ${{ format('{0}-pr-{1}', needs.config.outputs.stack-prefix, github.event.pull_request.number) }}
+      worker-name: ${{ format('{0}-pr-{1}', needs.config.outputs.worker-prefix, github.event.pull_request.number) }}
+      cloud-url: ${{ needs.config.outputs.backend-url }}
+      github-environment: preview
+      comment-on-pr: true
+      remove-stack: true
+    secrets: inherit

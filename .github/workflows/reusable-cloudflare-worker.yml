@@ -1,0 +1,158 @@
+name: Reusable Cloudflare Worker deployment
+
+on:
+  workflow_call:
+    inputs:
+      enabled:
+        description: Whether this operation is permitted by repository configuration.
+        required: true
+        type: boolean
+      operation:
+        description: "Pulumi command to run: preview, up, or destroy."
+        required: true
+        type: string
+      work-directory:
+        description: Directory containing Pulumi.yaml and package.json.
+        required: true
+        type: string
+      stack-name:
+        description: Target Pulumi stack.
+        required: true
+        type: string
+      worker-name:
+        description: Cloudflare Worker script name.
+        required: true
+        type: string
+      cloud-url:
+        description: Optional Pulumi backend URL.
+        required: false
+        type: string
+        default: ""
+      github-environment:
+        description: GitHub Environment used for deployment approvals and environment secrets.
+        required: true
+        type: string
+      comment-on-pr:
+        description: Whether Pulumi should update a pull request comment.
+        required: false
+        type: boolean
+        default: false
+      remove-stack:
+        description: Delete the stack after a successful destroy. Only valid for PR preview stacks.
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      PULUMI_ACCESS_TOKEN:
+        required: false
+      PULUMI_CONFIG_PASSPHRASE:
+        required: false
+      CLOUDFLARE_API_TOKEN:
+        required: false
+      CLOUDFLARE_ACCOUNT_ID:
+        required: false
+      CLOUDFLARE_WORKERS_DEV_SUBDOMAIN:
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  pulumi:
+    if: inputs.enabled
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: ${{ inputs.github-environment }}
+    steps:
+      - name: Reject unsupported operation
+        if: inputs.operation != 'preview' && inputs.operation != 'up' && inputs.operation != 'destroy'
+        run: |
+          echo "Unsupported Pulumi operation: ${{ inputs.operation }}" >&2
+          exit 1
+
+      - name: Restrict stack deletion to preview stacks
+        if: inputs.remove-stack && !startsWith(inputs.stack-name, 'pr-') && !contains(inputs.stack-name, '-pr-')
+        run: |
+          echo 'Only pull request preview stacks may be deleted automatically.' >&2
+          exit 1
+
+      - name: Check required deployment settings
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_WORKERS_DEV_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_DEV_SUBDOMAIN }}
+        run: |
+          for name in PULUMI_ACCESS_TOKEN CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_WORKERS_DEV_SUBDOMAIN; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::$name must be configured before enabling Pulumi deployment."
+              exit 1
+            fi
+          done
+
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - name: Install infrastructure dependencies
+        working-directory: ${{ inputs.work-directory }}
+        run: npm ci
+
+      - name: Run Pulumi ${{ inputs.operation }}
+        uses: pulumi/actions@v7
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_WORKERS_DEV_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_DEV_SUBDOMAIN }}
+          CLOUDFLARE_WORKER_NAME: ${{ inputs.worker-name }}
+        with:
+          command: ${{ inputs.operation }}
+          pulumi-version-file: ${{ github.workspace }}/.pulumi.version
+          work-dir: ${{ inputs.work-directory }}
+          stack-name: ${{ inputs.stack-name }}
+          cloud-url: ${{ inputs.cloud-url }}
+          upsert: ${{ inputs.operation != 'destroy' }}
+          diff: true
+          comment-on-pr: ${{ inputs.comment-on-pr }}
+          suppress-outputs: true
+          remove: ${{ inputs.remove-stack }}
+          github-token: ${{ github.token }}
+
+      - name: Smoke test deployed Worker
+        if: inputs.operation == 'up'
+        env:
+          CLOUDFLARE_WORKERS_DEV_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_DEV_SUBDOMAIN }}
+          WORKER_NAME: ${{ inputs.worker-name }}
+        run: |
+          worker_url="https://${WORKER_NAME}.${CLOUDFLARE_WORKERS_DEV_SUBDOMAIN}.workers.dev/"
+          curl --fail --retry 5 --retry-all-errors --retry-delay 2 --show-error --silent "$worker_url"
+          {
+            echo '## Cloudflare Worker smoke test'
+            echo
+            echo "- URL: $worker_url"
+            echo '- Result: passed'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  skipped:
+    if: ${{ !inputs.enabled }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Publish skipped operation
+        run: |
+          {
+            echo '## Pulumi operation skipped'
+            echo
+            echo "- Operation: \\`${{ inputs.operation }}\\`"
+            echo '- Reason: the repository CI/CD configuration has this deployment path disabled.'
+          } >> "$GITHUB_STEP_SUMMARY"

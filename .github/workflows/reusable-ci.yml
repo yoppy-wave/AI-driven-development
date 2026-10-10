@@ -1,0 +1,85 @@
+name: Reusable CI
+
+on:
+  workflow_call:
+    outputs:
+      pulumi-enabled:
+        description: Whether Pulumi operations are enabled by repository configuration.
+        value: ${{ jobs.ci.outputs.pulumi-enabled }}
+      pulumi-work-directory:
+        description: Directory containing the Pulumi project.
+        value: ${{ jobs.ci.outputs.pulumi-work-directory }}
+      pulumi-backend-url:
+        description: Optional Pulumi backend URL.
+        value: ${{ jobs.ci.outputs.pulumi-backend-url }}
+      stack-prefix:
+        description: Prefix for environment and preview stacks.
+        value: ${{ jobs.ci.outputs.stack-prefix }}
+      worker-prefix:
+        description: Prefix for Cloudflare Worker names in the minimal example.
+        value: ${{ jobs.ci.outputs.worker-prefix }}
+      preview-environment-enabled:
+        description: Whether PR preview environment updates are enabled.
+        value: ${{ jobs.ci.outputs.preview-environment-enabled }}
+      development-enabled:
+        description: Whether development deployments are enabled.
+        value: ${{ jobs.ci.outputs.development-enabled }}
+      staging-enabled:
+        description: Whether staging deployments are enabled.
+        value: ${{ jobs.ci.outputs.staging-enabled }}
+      production-enabled:
+        description: Whether production deployments are enabled.
+        value: ${{ jobs.ci.outputs.production-enabled }}
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      pulumi-enabled: ${{ steps.config.outputs.pulumi_enabled }}
+      pulumi-work-directory: ${{ steps.config.outputs.pulumi_work_directory }}
+      pulumi-backend-url: ${{ steps.config.outputs.pulumi_backend_url }}
+      stack-prefix: ${{ steps.config.outputs.stack_prefix }}
+      worker-prefix: ${{ steps.config.outputs.worker_prefix }}
+      preview-environment-enabled: ${{ steps.config.outputs.preview_environment_enabled }}
+      development-enabled: ${{ steps.config.outputs.development_enabled }}
+      staging-enabled: ${{ steps.config.outputs.staging_enabled }}
+      production-enabled: ${{ steps.config.outputs.production_enabled }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - name: Validate CI/CD configuration
+        id: config
+        run: python .github/scripts/cicd_config.py github-output >> "$GITHUB_OUTPUT"
+
+      - name: Run regression suites
+        run: python .github/scripts/run_regression.py
+
+      - name: Publish CI summary
+        run: |
+          {
+            echo '## CI/CD configuration'
+            echo
+            echo "- Pulumi: \\`${{ steps.config.outputs.pulumi_enabled }}\\`"
+            echo "- Preview Environment: \\`${{ steps.config.outputs.preview_environment_enabled }}\\`"
+            echo "- Development deployment: \\`${{ steps.config.outputs.development_enabled }}\\`"
+            echo "- Staging deployment: \\`${{ steps.config.outputs.staging_enabled }}\\`"
+            echo "- Production deployment: \\`${{ steps.config.outputs.production_enabled }}\\`"
+          } >> "$GITHUB_STEP_SUMMARY"

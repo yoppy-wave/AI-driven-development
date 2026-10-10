@@ -21,6 +21,21 @@ Stateは開発・検証・本番などのStackごとに分け、Pulumi Cloudま�
 
 将来GitHub ActionsでPulumiを実行する場合は、公式`pulumi/actions`の`pulumi-version-file: .pulumi.version`を指定し、Dev Containerと同一のCLIバージョンを使用します。認証情報と`PULUMI_CONFIG_PASSPHRASE`などの機密値はGitHub Secretsで渡します。Provider固有のルールは、必要になった時点で`.github/instructions/`と`.cline/rules/`へ対象Provider専用ファイルとして追加します。
 
+## 再利用可能なCI/CD基盤
+
+`.github/workflows/reusable-ci.yml`はクラウド非依存のCI、`.github/workflows/reusable-cloudflare-worker.yml`はCloudflare Worker用のPulumiアダプターです。どちらもGitHub Actionsの`workflow_call`で呼び出す再利用ワークフローであり、仕様に従って`.github/workflows/`直下に置いています。`.github/workflows/cicd.yml`はPR・信頼済みブランチへのpush・手動実行の入口、`.github/workflows/cicd-preview-cleanup.yml`はPR close時の一時環境削除の入口です。
+
+アプリ固有の有効化状態は[`.github/cicd/application.json`](.github/cicd/application.json)で管理します。初期状態ではPulumi、PRごとの一時環境、development / staging / productionデプロイをすべて無効にしているため、クラウド認証情報やState backendが未設定でもクラウド操作は行いません。CIは設定検証と、検出したPython・Node.jsプロジェクトの`test`、任意の`lint`、`typecheck`、`build`を実行します。
+
+Cloudflare + Pulumiの最小例は[`examples/cloudflare-worker/`](examples/cloudflare-worker/)にあります。実際に有効化する前に、次を設定してください。
+
+1. `.github/cicd/application.json`の`pulumi.enabled`、必要な`deployments`、PR一時環境を使う場合は`previewEnvironmentEnabled`を`true`にする。
+2. Pulumi Cloudまたは組織管理のbackendを選び、必要なら`pulumi.backendUrl`を設定する。
+3. GitHub Secretsに`PULUMI_ACCESS_TOKEN`、`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_WORKERS_DEV_SUBDOMAIN`を設定する。Cloudflare tokenは対象Accountに限定し、Workers Scriptsの読み書き権限だけを付与する。
+4. productionを有効化する場合は、GitHubの`production` Environmentに承認者とEnvironment Secretsを設定する。
+
+PR一時環境は`<stack-prefix>-pr-<PR番号>`のPulumi Stackと`<worker-prefix>-pr-<PR番号>`のWorkerを使用します。Fork PRではSecretsを使う一時環境作成を実行しません。Cloudflare Workerの`up`後は`https://<worker>.<workers.devサブドメイン>.workers.dev/`へスモークテストを実行します。PR close時の自動削除は、上記のPR専用Stackだけを対象にします。
+
 ## 初回の準備
 
 ### 1. WSL2・UbuntuとVS Code

@@ -101,7 +101,7 @@ def node_project(root: Path, project: Path) -> None:
     else:
         manager = ["corepack", "pnpm" if locks[0] == "pnpm-lock.yaml" else "yarn"]
         run([*manager, "install", "--frozen-lockfile" if manager[-1] == "pnpm" else "--immutable"], directory)
-    for name in ("test", "lint", "typecheck"):
+    for name in ("test", "lint", "typecheck", "build"):
         if name in package.get("scripts", {}):
             run([*manager, "run", name], directory)
 
