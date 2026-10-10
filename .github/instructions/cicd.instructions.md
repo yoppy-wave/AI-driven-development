@@ -4,7 +4,7 @@ applyTo: ".github/cicd/**,.github/workflows/cicd*.yml,.github/workflows/reusable
 
 # CI/CD共通基盤の開発指示
 
-- PR起点のクラウド認証情報はRepository Secretではなく、対象GitHub EnvironmentのEnvironment Secretとしてのみ管理する。`preview`、`staging`、`production`にはrequired reviewersを設定する。
+- PR起点のクラウド認証情報はRepository Secretではなく、対象GitHub EnvironmentのEnvironment Secretとしてのみ管理する。callerから`workflow_call.secrets`で転送せず、再利用ワークフロー内のEnvironmentを割り当てたjobが実行時に直接参照する。`preview`、`staging`、`production`にはrequired reviewersを設定する。
 - `pull_request`からクラウド操作する際はFork判定だけでなく、作成者の`author_association`をOWNER、MEMBER、COLLABORATORに限定し、`pull_request_target`へ変更しない。
 - PR一時環境のcleanupは現在の設定ではなく、作成時にGitHub Actionsが記録した不変のターゲットを使用する。記録にはPR番号を含むStack/Worker名と作成時commit SHAを含める。
 - 再利用ワークフローはGitHub Actionsの仕様に従い、`.github/workflows/`直下に置き、`on.workflow_call`で入力・Secrets・出力を明示する。サブディレクトリへ置かない。

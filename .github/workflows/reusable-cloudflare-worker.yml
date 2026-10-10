@@ -62,7 +62,10 @@ jobs:
     if: inputs.enabled
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    environment: ${{ inputs.github-environment }}
+    # Environment Secrets are resolved by this called-workflow job. They are not
+    # forwarded by the caller because workflow_call cannot receive an environment.
+    environment:
+      name: ${{ inputs.github-environment }}
     steps:
       - name: Reject unsupported operation
         if: inputs.operation != 'preview' && inputs.operation != 'up' && inputs.operation != 'destroy'
