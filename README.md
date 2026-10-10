@@ -21,6 +21,21 @@ Stateは開発・検証・本番などのStackごとに分け、Pulumi Cloudま�
 
 将来GitHub ActionsでPulumiを実行する場合は、公式`pulumi/actions`の`pulumi-version-file: .pulumi.version`を指定し、Dev Containerと同一のCLIバージョンを使用します。認証情報と`PULUMI_CONFIG_PASSPHRASE`などの機密値はGitHub Secretsで渡します。Provider固有のルールは、必要になった時点で`.github/instructions/`と`.cline/rules/`へ対象Provider専用ファイルとして追加します。
 
+## 再利用可能なCI/CD基盤
+
+`.github/workflows/reusable-ci.yml`はクラウド非依存のCI、`.github/workflows/reusable-cloudflare-worker.yml`はCloudflare Worker用のPulumiアダプターです。どちらもGitHub Actionsの`workflow_call`で呼び出す再利用ワークフローであり、仕様に従って`.github/workflows/`直下に置いています。`.github/workflows/cicd.yml`はPR・信頼済みブランチへのpush・手動実行の入口、`.github/workflows/cicd-preview-cleanup.yml`はPR close時の一時環境削除の入口です。
+
+アプリ固有の有効化状態は[`.github/cicd/application.json`](.github/cicd/application.json)で管理します。初期状態ではPulumi、PRごとの一時環境、development / staging / productionデプロイをすべて無効にしているため、クラウド認証情報やState backendが未設定でもクラウド操作は行いません。CIは設定検証と、検出したPython・Node.jsプロジェクトの`test`、任意の`lint`、`typecheck`、`build`を実行します。
+
+Cloudflare + Pulumiの最小例は[`examples/cloudflare-worker/`](examples/cloudflare-worker/)にあります。実際に有効化する前に、次を設定してください。
+
+1. `.github/cicd/application.json`の`pulumi.enabled`、必要な`deployments`、PR一時環境を使う場合は`previewEnvironmentEnabled`を`true`にする。
+2. Pulumi Cloudまたは組織管理のbackendを選び、必要なら`pulumi.backendUrl`を設定する。
+3. `preview`、`development`、`staging`、`production`のGitHub Environmentを作成し、`PULUMI_ACCESS_TOKEN`、`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_WORKERS_DEV_SUBDOMAIN`を**各Environment Secret**として設定する。再利用workflowは必要Secretsを`workflow_call.secrets`で明示し、callerは同じ5個だけを`jobs.<job_id>.secrets`で明示的に渡す。実行jobにはEnvironmentを割り当てるため、同名のEnvironment Secretがcallerから渡されたSecretより優先される。Cloudflare tokenは対象Accountに限定し、Workers Scriptsの読み書き権限だけを付与する。
+4. `preview`、`staging`、`production`にはrequired reviewersを設定する。特に`preview`はPR起点でクラウド認証情報を使うため、承認なしに実行できないようにする。productionには承認者と必要なdeployment branch policyも設定する。
+
+PR一時環境は`<stack-prefix>-pr-<PR番号>`のPulumi Stackと`<worker-prefix>-pr-<PR番号>`のWorkerを使用します。`preview`は完了後に同じStackへの`up`を直列実行します。Fork PRおよび`OWNER`、`MEMBER`、`COLLABORATOR`以外のPR作成者では、Secretsを使う一時環境作成を実行しません。Cloudflare Workerの`up`後は`https://<worker>.<workers.devサブドメイン>.workers.dev/`へスモークテストを実行します。cleanup対象はPulumi操作の前にGitHub Actionsが記録したStack名、Worker名、backend、IaC commit SHAから復元するため、後続コミットで設定を無効化・変更してもPR close時の削除対象を失いません。記録に失敗した場合は`up`を開始しません。
+
 ## 初回の準備
 
 ### 1. WSL2・UbuntuとVS Code

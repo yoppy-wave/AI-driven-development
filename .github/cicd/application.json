@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "application": {
+    "name": "example-worker",
+    "workerPrefix": "example-worker"
+  },
+  "ci": {
+    "enabled": true
+  },
+  "pulumi": {
+    "enabled": false,
+    "workDirectory": "examples/cloudflare-worker/infra",
+    "backendUrl": "",
+    "stackPrefix": "example-worker",
+    "previewEnvironmentEnabled": false
+  },
+  "deployments": {
+    "development": false,
+    "staging": false,
+    "production": false
+  }
+}

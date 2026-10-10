@@ -1,0 +1,127 @@
+name: Application CI/CD
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+  push:
+    branches: [main, stg, prod]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to deploy when enabled by configuration.
+        required: true
+        type: choice
+        options: [development, staging, production]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: cicd-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: ./.github/workflows/reusable-ci.yml
+
+  preview:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) && needs.ci.outputs.pulumi-enabled == 'true'
+    needs: ci
+    uses: ./.github/workflows/reusable-cloudflare-worker.yml
+    with:
+      enabled: true
+      operation: preview
+      work-directory: ${{ needs.ci.outputs.pulumi-work-directory }}
+      stack-name: ${{ format('{0}-pr-{1}', needs.ci.outputs.stack-prefix, github.event.pull_request.number) }}
+      worker-name: ${{ format('{0}-pr-{1}', needs.ci.outputs.worker-prefix, github.event.pull_request.number) }}
+      cloud-url: ${{ needs.ci.outputs.pulumi-backend-url }}
+      github-environment: preview
+      comment-on-pr: true
+      source-ref: ${{ github.event.pull_request.head.sha }}
+    secrets:
+      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_WORKERS_DEV_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_DEV_SUBDOMAIN }}
+
+  preview-environment:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) && needs.ci.outputs.preview-environment-enabled == 'true'
+    needs: [ci, preview]
+    uses: ./.github/workflows/reusable-cloudflare-worker.yml
+    with:
+      enabled: true
+      operation: up
+      work-directory: ${{ needs.ci.outputs.pulumi-work-directory }}
+      stack-name: ${{ format('{0}-pr-{1}', needs.ci.outputs.stack-prefix, github.event.pull_request.number) }}
+      worker-name: ${{ format('{0}-pr-{1}', needs.ci.outputs.worker-prefix, github.event.pull_request.number) }}
+      cloud-url: ${{ needs.ci.outputs.pulumi-backend-url }}
+      github-environment: preview
+      comment-on-pr: true
+      record-preview-cleanup: true
+      source-ref: ${{ github.event.pull_request.head.sha }}
+    secrets:
+      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_WORKERS_DEV_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_DEV_SUBDOMAIN }}
+
+  deploy-development:
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.ci.outputs.development-enabled == 'true') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'development' && needs.ci.outputs.development-enabled == 'true')
+    needs: ci
+    uses: ./.github/workflows/reusable-cloudflare-worker.yml
+    with:
+      enabled: true
+      operation: up
+      work-directory: ${{ needs.ci.outputs.pulumi-work-directory }}
+      stack-name: ${{ format('{0}-dev', needs.ci.outputs.stack-prefix) }}
+      worker-name: ${{ format('{0}-dev', needs.ci.outputs.worker-prefix) }}
+      cloud-url: ${{ needs.ci.outputs.pulumi-backend-url }}
+      github-environment: development
+    secrets:
+      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_WORKERS_DEV_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_DEV_SUBDOMAIN }}
+
+  deploy-staging:
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/stg' && needs.ci.outputs.staging-enabled == 'true') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging' && needs.ci.outputs.staging-enabled == 'true')
+    needs: ci
+    uses: ./.github/workflows/reusable-cloudflare-worker.yml
+    with:
+      enabled: true
+      operation: up
+      work-directory: ${{ needs.ci.outputs.pulumi-work-directory }}
+      stack-name: ${{ format('{0}-stg', needs.ci.outputs.stack-prefix) }}
+      worker-name: ${{ format('{0}-stg', needs.ci.outputs.worker-prefix) }}
+      cloud-url: ${{ needs.ci.outputs.pulumi-backend-url }}
+      github-environment: staging
+    secrets:
+      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_WORKERS_DEV_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_DEV_SUBDOMAIN }}
+
+  deploy-production:
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/prod' && needs.ci.outputs.production-enabled == 'true') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'production' && needs.ci.outputs.production-enabled == 'true')
+    needs: ci
+    uses: ./.github/workflows/reusable-cloudflare-worker.yml
+    with:
+      enabled: true
+      operation: up
+      work-directory: ${{ needs.ci.outputs.pulumi-work-directory }}
+      stack-name: ${{ format('{0}-prod', needs.ci.outputs.stack-prefix) }}
+      worker-name: ${{ format('{0}-prod', needs.ci.outputs.worker-prefix) }}
+      cloud-url: ${{ needs.ci.outputs.pulumi-backend-url }}
+      github-environment: production
+    secrets:
+      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_WORKERS_DEV_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_DEV_SUBDOMAIN }}

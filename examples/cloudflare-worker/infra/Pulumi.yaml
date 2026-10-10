@@ -1,0 +1,4 @@
+name: cloudflare-worker-example
+runtime:
+  name: nodejs
+description: Minimal Cloudflare Worker managed by Pulumi for CI/CD verification.
