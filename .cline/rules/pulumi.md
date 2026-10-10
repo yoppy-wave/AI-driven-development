@@ -2,6 +2,8 @@
 paths:
   - "Pulumi.yaml"
   - "Pulumi.*.yaml"
+  - "**/Pulumi.yaml"
+  - "**/Pulumi.*.yaml"
   - ".pulumi.version"
   - "**/infra/**"
   - "**/infrastructure/**"

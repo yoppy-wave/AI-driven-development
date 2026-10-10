@@ -41,8 +41,7 @@ RUN apt-get update \
     && curl --fail --location --silent --show-error \
         "https://github.com/pulumi/pulumi/releases/download/v${pulumi_version}/SHA512SUMS" \
         --output /tmp/pulumi-sha512sums \
-    && grep " ${pulumi_archive}$" /tmp/pulumi-sha512sums \
-        | sed "s#  #  /tmp/#" \
+    && awk -v archive="${pulumi_archive}" '$2 == archive { print $1 "  /tmp/" $2; found=1 } END { exit !found }' /tmp/pulumi-sha512sums \
         | sha512sum --check --status \
     && mkdir -p /opt/pulumi/bin \
     && tar --extract --gzip --file "/tmp/${pulumi_archive}" --directory /opt/pulumi/bin --strip-components=1 \

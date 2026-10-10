@@ -1,5 +1,5 @@
 ---
-applyTo: "Pulumi.yaml,Pulumi.*.yaml,.pulumi.version,**/infra/**,**/infrastructure/**,**/*pulumi*.ts,**/*pulumi*.mts,**/*pulumi*.cts"
+applyTo: "Pulumi.yaml,Pulumi.*.yaml,**/Pulumi.yaml,**/Pulumi.*.yaml,.pulumi.version,**/infra/**,**/infrastructure/**,**/*pulumi*.ts,**/*pulumi*.mts,**/*pulumi*.cts"
 ---
 
 # Pulumi・IaCの開発指示
