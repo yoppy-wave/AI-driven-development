@@ -3,7 +3,6 @@
 
 import json
 import os
-import re
 import subprocess
 import sys
 import tomllib
@@ -37,7 +36,7 @@ def test_file(path: Path) -> bool:
     )
 
 
-def discover(root: Path) -> tuple[list[Path], list[Path], list[Path], list[Path]]:
+def discover(root: Path) -> tuple[list[Path], list[Path]]:
     files = repository_files(root)
     python_roots = {
         path.parent for path in files
@@ -49,9 +48,6 @@ def discover(root: Path) -> tuple[list[Path], list[Path], list[Path], list[Path]
         path for path in node_roots
         if nearest_project(path / "package.json", node_roots - {path}) is None
     }
-    csprojs = [path for path in files if path.suffix == ".csproj"]
-    dotnet_roots = {path.parent for path in csprojs}
-
     for project in python_roots:
         if not any(test_file(path) and nearest_project(path, python_roots) == project for path in files):
             raise RuntimeError(f"Python project {project} has no test_*.py or *_test.py tests")
@@ -59,24 +55,12 @@ def discover(root: Path) -> tuple[list[Path], list[Path], list[Path], list[Path]
         package = json.loads((root / project / "package.json").read_text(encoding="utf-8"))
         if not isinstance(package.get("scripts", {}).get("test"), str):
             raise RuntimeError(f"Node project {project} has no test script")
-    if csprojs and not any(is_dotnet_test_project(root / path) for path in csprojs):
-        raise RuntimeError("C# projects exist but no test project was found")
-
     for path in files:
         if path.suffix == ".py" and nearest_project(path, python_roots) is None:
             raise RuntimeError(f"Python source {path} has no project manifest")
         if path.suffix in {".ts", ".tsx", ".mts", ".cts"} and nearest_project(path, node_roots) is None:
             raise RuntimeError(f"TypeScript source {path} has no package.json")
-        if path.suffix == ".cs" and nearest_project(path, dotnet_roots) is None:
-            raise RuntimeError(f"C# source {path} has no .csproj")
-    return sorted(python_roots), sorted(node_roots), sorted(csprojs), files
-
-
-def is_dotnet_test_project(path: Path) -> bool:
-    if re.search(r"(?:Tests?|Spec)\.csproj$", path.name, re.IGNORECASE):
-        return True
-    return bool(re.search(r"<IsTestProject>\s*true\s*</IsTestProject>",
-                          path.read_text(encoding="utf-8"), re.IGNORECASE))
+    return sorted(python_roots), sorted(node_roots)
 
 
 def run(command: list[str], cwd: Path) -> None:
@@ -124,7 +108,7 @@ def node_project(root: Path, project: Path) -> None:
 
 def main() -> None:
     root = Path(__file__).resolve().parents[2]
-    python_roots, node_roots, csprojs, _ = discover(root)
+    python_roots, node_roots = discover(root)
     helper_tests = root / ".github" / "scripts" / "tests"
     run([sys.executable, "-m", "unittest", "discover", "-s", str(helper_tests), "-p", "test_*.py"], root)
 
@@ -134,12 +118,6 @@ def main() -> None:
         python_project(root, project)
     for project in node_roots:
         node_project(root, project)
-    if csprojs:
-        tests = [path for path in csprojs if is_dotnet_test_project(root / path)]
-        for path in csprojs:
-            run(["dotnet", "build", str(path), "--configuration", "Release"], root)
-        for path in tests:
-            run(["dotnet", "test", str(path), "--configuration", "Release", "--no-restore"], root)
     print("All discovered regression suites passed.", flush=True)
 
 

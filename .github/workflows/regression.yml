@@ -1,14 +1,13 @@
 name: Regression tests
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+  push:
 
 permissions:
   contents: read
 
 concurrency:
-  group: regression-${{ github.event.pull_request.number }}
+  group: regression-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -18,7 +17,7 @@ jobs:
     env:
       CI: 'true'
     steps:
-      - name: Check out the proposed merge result
+      - name: Check out the pushed commit
         uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -33,11 +32,6 @@ jobs:
         with:
           node-version: '24'
           package-manager-cache: false
-
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: '10.0.x'
 
       - name: Run regression suites
         run: python .github/scripts/run_regression.py

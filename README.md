@@ -183,11 +183,15 @@ Dockerfileだけを `docker build` した場合、Node.js Feature・拡張機能
 
 このフォルダーをGitHubリポジトリにコミットし、Codespaceを作成すると、`.devcontainer/devcontainer.json` を使って環境を構築できます。Codespaces側にはコンテナを動かす仕組みがあるため、WSLや上記のDocker Engine導入スクリプトの実行は不要です。Clineの認証は利用する環境で設定してください。[GitHubのDev Container設定ガイド](https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/adding-a-dev-container-configuration/introduction-to-dev-containers)も参照できます。
 
+## GitHubリポジトリの初回設定
+
+`prod` / `stg` ブランチの作成、直接pushを防ぐRuleset、必須CIなど、GitHub画面上で一度行う設定は[GitHubリポジトリの初回設定](docs/github-repository-setup.md)を参照してください。
+
 ## issueの質問にAIで回答する
 
 以下のActionsワークフローはOpenAI APIキー方式です。
 
-[`.github/workflows/ai-question.yml`](.github/workflows/ai-question.yml) は、issueに `ai-question` ラベルを付けたときに起動します。GitHub ActionsのUbuntu 24.04上でPython 3.12、Node.js 24、.NET 10、Cline CLIを用意し、issueのタイトルと本文を質問として渡します。Clineはその時点のソースを調べ、回答を同じissueへコメントします。読み取り以外のツールをフックで止め、作業ツリーが変更された場合も投稿を停止します。
+[`.github/workflows/ai-question.yml`](.github/workflows/ai-question.yml) は、issueに `ai-question` ラベルを付けたときに起動します。GitHub ActionsのUbuntu 24.04上でPython 3.12、Node.js 24、Cline CLIを用意し、issueのタイトルと本文を質問として渡します。Clineはその時点のソースを調べ、回答を同じissueへコメントします。読み取り以外のツールをフックで止め、作業ツリーが変更された場合も投稿を停止します。
 
 利用前に[OpenAI Platform](https://platform.openai.com/api-keys)でAPIキーを作成し、リポジトリの **Settings → Secrets and variables → Actions** にRepository secret `OPENAI_API_KEY` として登録してください。ChatGPT Proとは別のAPI利用料金が発生します。使用モデルを変える場合はRepository variable `CLINE_MODEL` にOpenAI APIで利用できるモデルIDを設定します。未設定時は `gpt-5.4` を使います。キーをファイルへ書いたり、Gitへコミットしたりしないでください。
 
@@ -203,11 +207,11 @@ Dockerfileだけを `docker build` した場合、Node.js Feature・拡張機能
 
 既定の `GITHUB_TOKEN` で作ったPRのチェックは、GitHubの設定によって実行承認が必要になります。PR作成後のCIも自動実行したい場合は、`contents: write` と `pull-requests: write` の権限を持つPersonal Access TokenをRepository secret `AI_CODING_PR_TOKEN` に登録できます。登録しなければ `GITHUB_TOKEN` を使用します。Cline CLI実行中にはPR作成用トークンを渡さず、PRは必ず人が内容を確認してからマージしてください。実装用Clineはコマンドを実行できるため、APIキーはその実行環境から参照可能です。信頼できる担当者だけが `ai-coding` ラベルを付け、APIキーには利用上限を設定してください。
 
-## PRで既存機能の破壊を検知する
+## pushで既存機能の破壊を検知する
 
-[`.github/workflows/regression.yml`](.github/workflows/regression.yml) は、PRの作成・更新・再オープン時に、提案された変更を既定ブランチへマージした状態でテストします。ドラフトPRも対象です。APIキーなどのSecretsは渡さず、リポジトリは読み取り権限でチェックアウトします。
+[`.github/workflows/regression.yml`](.github/workflows/regression.yml) は、すべてのブランチへのpush時に、pushされたコミットをテストします。同じブランチへ連続してpushされた場合は、実行中の古いテストをキャンセルして最新のpushを優先します。APIキーなどのSecretsは渡さず、リポジトリは読み取り権限でチェックアウトします。
 
-現在は `.github/scripts/tests/` の既存テストを毎回実行します。今後アプリを追加した場合は、[回帰テスト実行スクリプト](.github/scripts/run_regression.py) がPythonの `pyproject.toml` / `requirements.txt`、TypeScriptの `package.json`、C#の `.csproj` を探し、各プロジェクトのテストを実行します。Pythonは `pytest`、Node.jsは `test` スクリプト（設定があれば `lint` と `typecheck` も）、C#は `dotnet build` と `dotnet test` を使います。Pythonのテストファイル、Node.jsの `test` スクリプト、C#のテストプロジェクトがない場合は失敗させ、テストなしの新機能を見落とさないようにします。Node.jsでは再現可能な依存関係のため、npm・pnpm・Yarnのロックファイルを1つ置いてください。
+現在は `.github/scripts/tests/` の既存テストを毎回実行します。今後アプリを追加した場合は、[回帰テスト実行スクリプト](.github/scripts/run_regression.py) がPythonの `pyproject.toml` / `requirements.txt` と、TypeScriptの `package.json` を探し、各プロジェクトのテストを実行します。Pythonは `pytest`、Node.jsは `test` スクリプト（設定があれば `lint` と `typecheck` も）を使います。PythonのテストファイルまたはNode.jsの `test` スクリプトがない場合は失敗させ、テストなしの新機能を見落とさないようにします。Node.jsでは再現可能な依存関係のため、npm・pnpm・Yarnのロックファイルを1つ置いてください。
 
 テストでは、既存の条件・計算・戻り値の破壊、重要な処理の呼び出し削除、複数の入口での判断不一致、APIや型の変更に伴う更新漏れを検知するケースを追加してください。詳しい観点は [共通指示](.github/copilot-instructions.md) と [言語別指示](.github/instructions/) にあります。ワークフローはテストを実行しますが、テストが期待される振る舞いを十分に表しているかはレビューが必要です。DBなどを使う結合テストを追加した際は、必要なサービスと初期データもワークフローに設定してください。
 

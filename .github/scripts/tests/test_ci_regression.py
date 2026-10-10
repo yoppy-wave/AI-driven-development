@@ -23,7 +23,7 @@ class DiscoveryTests(unittest.TestCase):
         target.write_text(content, encoding="utf-8")
 
     def test_empty_repository_has_no_application_projects(self) -> None:
-        self.assertEqual(run_regression.discover(self.root)[:3], ([], [], []))
+        self.assertEqual(run_regression.discover(self.root), ([], []))
 
     def test_python_project_requires_tests(self) -> None:
         self.write("backend/pyproject.toml", "[project]\nname = 'backend'\nversion = '0.1'\n")
@@ -45,21 +45,6 @@ class DiscoveryTests(unittest.TestCase):
         self.write("web/package.json", '{"scripts":{"test":"vitest run"}}')
         self.write("web/src/app.ts", "export const app = true")
         self.assertEqual(run_regression.discover(self.root)[1], [Path("web")])
-
-    def test_dotnet_project_requires_test_project(self) -> None:
-        self.write("api/Api.csproj", "<Project />")
-        self.write("api/Service.cs", "class Service {}")
-        with self.assertRaisesRegex(RuntimeError, "no test project"):
-            run_regression.discover(self.root)
-        self.write("tests/Api.Tests.csproj", "<Project />")
-        self.assertEqual(len(run_regression.discover(self.root)[2]), 2)
-
-    def test_new_csharp_source_must_belong_to_a_project(self) -> None:
-        self.write("api/Api.csproj", "<Project />")
-        self.write("tests/Api.Tests.csproj", "<Project />")
-        self.write("new-feature/Handler.cs", "class Handler {}")
-        with self.assertRaisesRegex(RuntimeError, "no .csproj"):
-            run_regression.discover(self.root)
 
     def test_nested_node_package_uses_root_workspace(self) -> None:
         self.write("package.json", '{"scripts":{"test":"npm -ws test"}}')
