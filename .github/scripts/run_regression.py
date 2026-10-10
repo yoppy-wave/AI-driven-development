@@ -14,7 +14,6 @@ IGNORED_DIRS = {
     ".git", ".github", ".devcontainer", ".venv", "venv", "node_modules",
     "dist", "build", "bin", "obj", "coverage", ".next", "__pycache__",
 }
-INFRASTRUCTURE_FILES = {Path("scripts/cline_poc.py")}
 
 
 def repository_files(root: Path) -> list[Path]:
@@ -64,8 +63,6 @@ def discover(root: Path) -> tuple[list[Path], list[Path], list[Path], list[Path]
         raise RuntimeError("C# projects exist but no test project was found")
 
     for path in files:
-        if path in INFRASTRUCTURE_FILES:
-            continue
         if path.suffix == ".py" and nearest_project(path, python_roots) is None:
             raise RuntimeError(f"Python source {path} has no project manifest")
         if path.suffix in {".ts", ".tsx", ".mts", ".cts"} and nearest_project(path, node_roots) is None:
