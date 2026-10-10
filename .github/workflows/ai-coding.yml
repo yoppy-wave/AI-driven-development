@@ -95,7 +95,7 @@ jobs:
           token: ${{ secrets.AI_CODING_PR_TOKEN || secrets.GITHUB_TOKEN }}
           base: ${{ github.event.repository.default_branch }}
           branch: ai-coding/issue-${{ github.event.issue.number }}
-          commit-message: 'Implement issue #${{ github.event.issue.number }} with Cline'
+          commit-message: 'Clineでissue #${{ github.event.issue.number }}を実装'
           title: 'AI実装: issue #${{ github.event.issue.number }}'
           body-path: ${{ runner.temp }}/ai-coding-pr-body.md
           draft: true
