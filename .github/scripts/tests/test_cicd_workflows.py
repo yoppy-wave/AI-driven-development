@@ -53,7 +53,7 @@ class CicdWorkflowTests(unittest.TestCase):
     def test_cloud_provider_secrets_are_limited_to_github_environments(self) -> None:
         content = workflow("reusable-cloudflare-worker.yml")
         self.assertIn("environment:\n      name: ${{ inputs.github-environment }}", content)
-        self.assertNotIn("secrets:", content)
+        self.assertIn("    secrets:\n      PULUMI_ACCESS_TOKEN:", content)
         self.assertIn("permissions:\n  contents: read\n  issues: write\n  pull-requests: write", content)
 
     def test_called_deployment_job_resolves_all_required_environment_secrets(self) -> None:
@@ -68,14 +68,36 @@ class CicdWorkflowTests(unittest.TestCase):
         self.assertGreaterEqual(content.count("PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}"), 2)
         self.assertGreaterEqual(content.count("CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}"), 2)
 
-    def test_callers_select_environments_without_forwarding_cloud_secrets(self) -> None:
+    def test_callers_forward_only_declared_secrets_while_called_jobs_keep_environment_boundaries(self) -> None:
         entrypoint = workflow("cicd.yml")
         cleanup = workflow("cicd-preview-cleanup.yml")
         self.assertNotIn("secrets: inherit", entrypoint)
         self.assertNotIn("secrets: inherit", cleanup)
+        for content, call_count in ((entrypoint, 5), (cleanup, 1)):
+            self.assertEqual(content.count("    secrets:\n"), call_count)
+            for secret in (
+                "PULUMI_ACCESS_TOKEN",
+                "PULUMI_CONFIG_PASSPHRASE",
+                "CLOUDFLARE_API_TOKEN",
+                "CLOUDFLARE_ACCOUNT_ID",
+                "CLOUDFLARE_WORKERS_DEV_SUBDOMAIN",
+            ):
+                self.assertEqual(content.count(f"      {secret}: ${{{{ secrets.{secret} }}}}"), call_count)
         for environment in ("preview", "development", "staging", "production"):
             self.assertIn(f"github-environment: {environment}", entrypoint)
         self.assertIn("github-environment: preview", cleanup)
+
+    def test_reusable_workflow_declares_each_forwarded_cloud_secret(self) -> None:
+        content = workflow("reusable-cloudflare-worker.yml")
+        for secret in (
+            "PULUMI_ACCESS_TOKEN",
+            "PULUMI_CONFIG_PASSPHRASE",
+            "CLOUDFLARE_API_TOKEN",
+            "CLOUDFLARE_ACCOUNT_ID",
+            "CLOUDFLARE_WORKERS_DEV_SUBDOMAIN",
+        ):
+            self.assertIn(f"      {secret}:", content)
+            self.assertIn("Environment Secret with this name takes precedence.", content)
 
     def test_cleanup_uses_the_immutable_preview_source_revision(self) -> None:
         cleanup = workflow("cicd-preview-cleanup.yml")

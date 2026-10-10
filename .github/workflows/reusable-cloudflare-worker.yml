@@ -52,6 +52,22 @@ on:
         required: false
         type: boolean
         default: false
+    secrets:
+      PULUMI_ACCESS_TOKEN:
+        description: Pulumi backend access token. An Environment Secret with this name takes precedence.
+        required: false
+      PULUMI_CONFIG_PASSPHRASE:
+        description: Optional Pulumi configuration passphrase. An Environment Secret with this name takes precedence.
+        required: false
+      CLOUDFLARE_API_TOKEN:
+        description: Cloudflare API token. An Environment Secret with this name takes precedence.
+        required: false
+      CLOUDFLARE_ACCOUNT_ID:
+        description: Cloudflare account identifier. An Environment Secret with this name takes precedence.
+        required: false
+      CLOUDFLARE_WORKERS_DEV_SUBDOMAIN:
+        description: Workers development subdomain. An Environment Secret with this name takes precedence.
+        required: false
 permissions:
   contents: read
   issues: write
@@ -62,8 +78,8 @@ jobs:
     if: inputs.enabled
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    # Environment Secrets are resolved by this called-workflow job. They are not
-    # forwarded by the caller because workflow_call cannot receive an environment.
+    # This called-workflow job resolves same-named Environment Secrets in preference
+    # to its explicitly forwarded workflow_call secrets.
     environment:
       name: ${{ inputs.github-environment }}
     steps:

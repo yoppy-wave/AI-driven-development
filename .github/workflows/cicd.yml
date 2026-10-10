@@ -40,6 +40,12 @@ jobs:
       github-environment: preview
       comment-on-pr: true
       source-ref: ${{ github.event.pull_request.head.sha }}
+    secrets:
+      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_WORKERS_DEV_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_DEV_SUBDOMAIN }}
 
   preview-environment:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) && needs.ci.outputs.preview-environment-enabled == 'true'
@@ -56,6 +62,12 @@ jobs:
       comment-on-pr: true
       record-preview-cleanup: true
       source-ref: ${{ github.event.pull_request.head.sha }}
+    secrets:
+      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_WORKERS_DEV_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_DEV_SUBDOMAIN }}
 
   deploy-development:
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.ci.outputs.development-enabled == 'true') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'development' && needs.ci.outputs.development-enabled == 'true')
@@ -69,6 +81,12 @@ jobs:
       worker-name: ${{ format('{0}-dev', needs.ci.outputs.worker-prefix) }}
       cloud-url: ${{ needs.ci.outputs.pulumi-backend-url }}
       github-environment: development
+    secrets:
+      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_WORKERS_DEV_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_DEV_SUBDOMAIN }}
 
   deploy-staging:
     if: (github.event_name == 'push' && github.ref == 'refs/heads/stg' && needs.ci.outputs.staging-enabled == 'true') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging' && needs.ci.outputs.staging-enabled == 'true')
@@ -82,6 +100,12 @@ jobs:
       worker-name: ${{ format('{0}-stg', needs.ci.outputs.worker-prefix) }}
       cloud-url: ${{ needs.ci.outputs.pulumi-backend-url }}
       github-environment: staging
+    secrets:
+      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_WORKERS_DEV_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_DEV_SUBDOMAIN }}
 
   deploy-production:
     if: (github.event_name == 'push' && github.ref == 'refs/heads/prod' && needs.ci.outputs.production-enabled == 'true') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'production' && needs.ci.outputs.production-enabled == 'true')
@@ -95,3 +119,9 @@ jobs:
       worker-name: ${{ format('{0}-prod', needs.ci.outputs.worker-prefix) }}
       cloud-url: ${{ needs.ci.outputs.pulumi-backend-url }}
       github-environment: production
+    secrets:
+      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_WORKERS_DEV_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_DEV_SUBDOMAIN }}
