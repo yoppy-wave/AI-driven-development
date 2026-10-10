@@ -183,25 +183,43 @@ Dockerfileだけを `docker build` した場合、Node.js Feature・拡張機能
 
 このフォルダーをGitHubリポジトリにコミットし、Codespaceを作成すると、`.devcontainer/devcontainer.json` を使って環境を構築できます。Codespaces側にはコンテナを動かす仕組みがあるため、WSLや上記のDocker Engine導入スクリプトの実行は不要です。Clineの認証は利用する環境で設定してください。[GitHubのDev Container設定ガイド](https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/adding-a-dev-container-configuration/introduction-to-dev-containers)も参照できます。
 
-## 会社・チームで利用する際の検討事項：通信先の許可リスト
+## issueの質問にAIで回答する
 
-会社でAI開発環境を利用する際は、社内方針に沿って、AIがアクセスしてよい外部サイトや通信先を定めることを検討します。現時点では将来の検討事項として記録しており、許可リストや通信制限は導入していません。
+以下のActionsワークフローはOpenAI APIキー方式です。
 
-記載例は [`docs/examples/whitelist.md`](docs/examples/whitelist.md) にあります。自動適用されない場所に置いています。導入時は内容を編集・レビューしたうえで `.clinerules/whitelist.md` へコピーし、Clineのルールとして有効にしてください。
+[`.github/workflows/ai-question.yml`](.github/workflows/ai-question.yml) は、issueに `ai-question` ラベルを付けたときに起動します。GitHub ActionsのUbuntu 24.04上でPython 3.12、Node.js 24、.NET 10、Cline CLIを用意し、issueのタイトルと本文を質問として渡します。Clineはその時点のソースを調べ、回答を同じissueへコメントします。読み取り以外のツールをフックで止め、作業ツリーが変更された場合も投稿を停止します。
 
-記載例のファイルには、Clineへの短い指示とURL一覧だけを記載しています。見出しや説明文は必須ではありません。この例は公式ドキュメントの参照・取得を対象とし、会社としての承認済みリストを意味しません。URLは正規表現ではなく、同じHTTPSのホスト・ポートにある記載パス配下を許可する例です。別のサブドメインやポートは含めず、一覧外へのリンクやリダイレクトも事前確認の対象にしています。
+利用前に[OpenAI Platform](https://platform.openai.com/api-keys)でAPIキーを作成し、リポジトリの **Settings → Secrets and variables → Actions** にRepository secret `OPENAI_API_KEY` として登録してください。ChatGPT Proとは別のAPI利用料金が発生します。使用モデルを変える場合はRepository variable `CLINE_MODEL` にOpenAI APIで利用できるモデルIDを設定します。未設定時は `gpt-5.4` を使います。キーをファイルへ書いたり、Gitへコミットしたりしないでください。
 
-Clineでは、例えば `.clinerules/whitelist.md` に許可するURL・ドメインと、一覧外へのアクセス前に確認するルールをMarkdownで記述できます。`whitelist.md` は任意のファイル名です。Clineのルールとして有効にし、Gitで管理することでチームに共有できます。仕組みは[Clineのルールに関する公式ドキュメント](https://docs.cline.bot/customization/cline-rules)を参照してください。
+ワークフローを既定ブランチに反映し、GitHub上に `ai-question` という名前のラベルを作成してから、質問したいissueへ付けます。既にラベルが付いているissueでは、一度外して付け直すと再実行できます。現在のリポジトリにアプリケーションコードがない質問では、その旨を回答する設定です。Cline CLIの処理が失敗した場合、回答コメントは投稿されません。
 
-会社で導入する際には、次の運用を決め、必要に応じて実際のルールに追記します。
+## issueからAIに実装させる
 
-- 許可範囲と用途、一覧外へのアクセスの承認担当者、リストの変更・レビュー担当。
-- 一覧外へのアクセス時に説明する内容（宛先・目的・操作内容・送信する情報）。一度の承認を恒久的な許可にせず、Clineが独断でリストを広げないこと。
-- 許可URLであっても、社内のソースコード・認証情報・個人情報などをURLのクエリや送信内容に含めないこと。
+[`.github/workflows/ai-coding.yml`](.github/workflows/ai-coding.yml) は、issueに `ai-coding` ラベルを付けたときに起動します。Cline CLIが既存コードとテストを確認して計画を立て、実装と関連チェックを行います。変更があれば `ai-coding/issue-<番号>` ブランチの**ドラフトPR**を作成・更新し、issueをPR本文から参照します。既定ブランチには直接反映しません。変更がない場合はClineの報告をissueにコメントします。
 
-Gitのリモートリポジトリ、npm・PyPIなどのパッケージ配布元、AIサービス、MCPサーバー、拡張機能の配布元は、この記載例には含まれていません。実際に必要な通信先と用途を確認し、社内承認後に追加してください。
+`ai-question` と同じRepository secret `OPENAI_API_KEY` を使い、Repository variable `CLINE_MODEL` でモデルを変更できます。Cline CLIにはPR作成用トークンを渡さず、後続の工程だけがPRを作成します。GitHubの **Settings → Actions → General → Workflow permissions** では、GitHub Actionsによるプルリクエストの作成を許可してください。GitHub上に `ai-coding` ラベルを作成し、ワークフローを既定ブランチへ反映してから利用します。
 
-MarkdownのルールはAIへの行動指示であり、通信を技術的に遮断するものではありません。AIサービスへのAPI通信や、ターミナルで実行するプログラムの通信全体を、このファイルだけで制限することはできません。会社の要件として一覧外への通信を強制的に禁止する場合は、プロキシやファイアウォールなどによる制御も別途設計します。
+この自動実装では `.github/` 配下の変更はPR化せず、実行を停止します。ワークフローやAI指示ファイル自体の変更は別途レビューして行ってください。
+
+既定の `GITHUB_TOKEN` で作ったPRのチェックは、GitHubの設定によって実行承認が必要になります。PR作成後のCIも自動実行したい場合は、`contents: write` と `pull-requests: write` の権限を持つPersonal Access TokenをRepository secret `AI_CODING_PR_TOKEN` に登録できます。登録しなければ `GITHUB_TOKEN` を使用します。Cline CLI実行中にはPR作成用トークンを渡さず、PRは必ず人が内容を確認してからマージしてください。実装用Clineはコマンドを実行できるため、APIキーはその実行環境から参照可能です。信頼できる担当者だけが `ai-coding` ラベルを付け、APIキーには利用上限を設定してください。
+
+## PRで既存機能の破壊を検知する
+
+[`.github/workflows/regression.yml`](.github/workflows/regression.yml) は、PRの作成・更新・再オープン時に、提案された変更を既定ブランチへマージした状態でテストします。ドラフトPRも対象です。APIキーなどのSecretsは渡さず、リポジトリは読み取り権限でチェックアウトします。
+
+現在は `.github/scripts/tests/` の既存テストを毎回実行します。今後アプリを追加した場合は、[回帰テスト実行スクリプト](.github/scripts/run_regression.py) がPythonの `pyproject.toml` / `requirements.txt`、TypeScriptの `package.json`、C#の `.csproj` を探し、各プロジェクトのテストを実行します。Pythonは `pytest`、Node.jsは `test` スクリプト（設定があれば `lint` と `typecheck` も）、C#は `dotnet build` と `dotnet test` を使います。Pythonのテストファイル、Node.jsの `test` スクリプト、C#のテストプロジェクトがない場合は失敗させ、テストなしの新機能を見落とさないようにします。Node.jsでは再現可能な依存関係のため、npm・pnpm・Yarnのロックファイルを1つ置いてください。
+
+テストでは、既存の条件・計算・戻り値の破壊、重要な処理の呼び出し削除、複数の入口での判断不一致、APIや型の変更に伴う更新漏れを検知するケースを追加してください。詳しい観点は [共通指示](.github/copilot-instructions.md) と [言語別指示](.github/instructions/) にあります。ワークフローはテストを実行しますが、テストが期待される振る舞いを十分に表しているかはレビューが必要です。DBなどを使う結合テストを追加した際は、必要なサービスと初期データもワークフローに設定してください。
+
+## 会社・チームで利用する際の検討事項：Squidの通信先許可リスト
+
+将来、会社の方針に合わせてプロキシで外部通信を制限する場合の記載例を [`.devcontainer/squid/whitelist.txt`](.devcontainer/squid/whitelist.txt) に置いています。現在はSquidを起動しておらず、このファイルによる通信制限も有効にしていません。
+
+このファイルはSquidの `dstdomain` ACLに読み込ませる想定で、**1行に1つのホスト名**を書きます。Markdown、URL、正規表現ではありません。例えばSquid側では `acl allowed_hosts dstdomain "/etc/squid/whitelist.txt"` のように参照し、許可・拒否の `http_access` ルールと組み合わせます。[SquidのACL説明](https://wiki.squid-cache.org/SquidFaq/SquidAcl)と[ホスト名リストを使う設定例](https://wiki.squid-cache.org/ConfigExamples/Authenticate/Bypass)を参照してください。
+
+この方式は接続先のホスト名を対象とします。HTTPSの `/3/` や `/docs/` などのパスまでは制限できません。ポートを443に限定する設定もリストとは別に必要です。記載したホスト名は説明用であり、会社が承認した通信先を意味しません。
+
+実際に制限するには、Squidの設定・起動、開発コンテナからの通信をプロキシに通す設定、プロキシを経由しない通信を防ぐネットワーク側の設定が必要です。Gitのリモート、npm・PyPI、AIサービス、MCPサーバー、拡張機能の配布元なども用途を確認してから許可先に追加します。
 
 ## 公式資料
 
