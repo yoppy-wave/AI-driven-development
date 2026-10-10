@@ -185,7 +185,7 @@ Dockerfileだけを `docker build` した場合、Node.js Feature・拡張機能
 
 ## GitHubリポジトリの初回設定
 
-`main` を共通基盤として残し、案件ごとの `prod/<案件>` / `stg/<案件>` ブランチ、直接pushを防ぐRuleset、必須CIなどを設定します。GitHub画面上で一度行う手順は[GitHubリポジトリの初回設定](docs/github-repository-setup.md)を参照してください。
+`prod` / `stg` ブランチの作成、直接pushを防ぐRuleset、必須CIなど、GitHub画面上で一度行う設定は[GitHubリポジトリの初回設定](docs/github-repository-setup.md)を参照してください。
 
 ## issueの質問にAIで回答する
 
