@@ -32,6 +32,11 @@ on:
         description: GitHub Environment used for deployment approvals and environment secrets.
         required: true
         type: string
+      source-ref:
+        description: Optional immutable commit to check out before running Pulumi.
+        required: false
+        type: string
+        default: ""
       comment-on-pr:
         description: Whether Pulumi should update a pull request comment.
         required: false
@@ -42,20 +47,14 @@ on:
         required: false
         type: boolean
         default: false
-    secrets:
-      PULUMI_ACCESS_TOKEN:
+      record-preview-cleanup:
+        description: Record the preview cleanup target before creating or updating a PR preview environment.
         required: false
-      PULUMI_CONFIG_PASSPHRASE:
-        required: false
-      CLOUDFLARE_API_TOKEN:
-        required: false
-      CLOUDFLARE_ACCOUNT_ID:
-        required: false
-      CLOUDFLARE_WORKERS_DEV_SUBDOMAIN:
-        required: false
-
+        type: boolean
+        default: false
 permissions:
   contents: read
+  issues: write
   pull-requests: write
 
 jobs:
@@ -77,6 +76,12 @@ jobs:
           echo 'Only pull request preview stacks may be deleted automatically.' >&2
           exit 1
 
+      - name: Restrict preview cleanup records to preview updates
+        if: inputs.record-preview-cleanup && inputs.operation != 'up'
+        run: |
+          echo 'Preview cleanup records can only be created before a Pulumi up operation.' >&2
+          exit 1
+
       - name: Check required deployment settings
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
@@ -95,7 +100,22 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.source-ref || github.sha }}
           persist-credentials: false
+
+      - name: Record preview cleanup target
+        if: inputs.record-preview-cleanup
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          body="$(python .github/scripts/preview_cleanup.py record-body \
+            --pull-request '${{ github.event.pull_request.number }}' \
+            --work-directory '${{ inputs.work-directory }}' \
+            --stack-name '${{ inputs.stack-name }}' \
+            --worker-name '${{ inputs.worker-name }}' \
+            --backend-url '${{ inputs.cloud-url }}' \
+            --source-ref '${{ inputs.source-ref }}')"
+          gh api --method POST "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" -f body="$body"
 
       - name: Set up Node.js
         uses: actions/setup-node@v7

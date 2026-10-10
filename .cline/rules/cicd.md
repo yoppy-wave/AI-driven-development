@@ -11,6 +11,9 @@ paths:
 
 # CI/CD共通基盤の開発指示
 
+- PR起点でクラウド認証情報を使用する操作は、GitHub EnvironmentのEnvironment Secretsだけを参照する。Repository Secretsや`secrets: inherit`を使わない。
+- preview、staging、productionのGitHub Environmentにはrequired reviewersを設定する。PR起点のpreviewはFork以外かつOWNER、MEMBER、COLLABORATORだけを対象にする。
+- previewの`up`は同一Stackの`preview`成功後に直列実行する。cleanupは現在の設定ではなく、作成時に記録したPR専用Stack、Worker、backend、commit SHAを使う。
 - 再利用ワークフローはGitHub Actionsの仕様に従い、`.github/workflows/`直下に置き、`on.workflow_call`で入力・Secrets・出力を明示する。サブディレクトリへ置かない。
 - `.github/cicd/application.json`をCI/CDの有効化契約として扱う。Pulumi、Preview Environment、各環境へのデプロイは明示的に`true`になるまで無効のままにし、無効時にクラウド認証、`pulumi up`、`pulumi destroy`を実行しない。
 - PRではテスト・build・設定検証を必ず先行し、クラウド認証が必要なPreview EnvironmentはFork PRで作成しない。`pull_request_target`でPRコードをcheckoutしてSecretsを渡す実装は追加しない。

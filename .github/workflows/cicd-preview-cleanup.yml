@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
   pull-requests: write
 
 concurrency:
@@ -13,42 +14,43 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  config:
+  cleanup-target:
     runs-on: ubuntu-24.04
     outputs:
-      preview-enabled: ${{ steps.config.outputs.preview_environment_enabled }}
-      work-directory: ${{ steps.config.outputs.pulumi_work_directory }}
-      backend-url: ${{ steps.config.outputs.pulumi_backend_url }}
-      stack-prefix: ${{ steps.config.outputs.stack_prefix }}
-      worker-prefix: ${{ steps.config.outputs.worker_prefix }}
+      found: ${{ steps.target.outputs.found }}
+      work-directory: ${{ steps.target.outputs.work_directory }}
+      backend-url: ${{ steps.target.outputs.backend_url }}
+      stack-name: ${{ steps.target.outputs.stack_name }}
+      worker-name: ${{ steps.target.outputs.worker_name }}
+      source-ref: ${{ steps.target.outputs.source_ref }}
     steps:
-      - name: Check out merged pull request base
+      - name: Check out CI/CD cleanup helper
         uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
 
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-
-      - name: Read CI/CD configuration
-        id: config
-        run: python .github/scripts/cicd_config.py github-output >> "$GITHUB_OUTPUT"
+      - name: Recover recorded preview cleanup target
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate --slurp "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            | python .github/scripts/preview_cleanup.py github-output --pull-request '${{ github.event.pull_request.number }}' \
+            >> "$GITHUB_OUTPUT"
 
   cleanup:
-    if: needs.config.outputs.preview-enabled == 'true'
-    needs: config
+    if: needs.cleanup-target.outputs.found == 'true'
+    needs: cleanup-target
     uses: ./.github/workflows/reusable-cloudflare-worker.yml
     with:
       enabled: true
       operation: destroy
-      work-directory: ${{ needs.config.outputs.work-directory }}
-      stack-name: ${{ format('{0}-pr-{1}', needs.config.outputs.stack-prefix, github.event.pull_request.number) }}
-      worker-name: ${{ format('{0}-pr-{1}', needs.config.outputs.worker-prefix, github.event.pull_request.number) }}
-      cloud-url: ${{ needs.config.outputs.backend-url }}
+      work-directory: ${{ needs.cleanup-target.outputs.work-directory }}
+      stack-name: ${{ needs.cleanup-target.outputs.stack-name }}
+      worker-name: ${{ needs.cleanup-target.outputs.worker-name }}
+      source-ref: ${{ needs.cleanup-target.outputs.source-ref }}
+      cloud-url: ${{ needs.cleanup-target.outputs.backend-url }}
       github-environment: preview
       comment-on-pr: true
       remove-stack: true
-    secrets: inherit

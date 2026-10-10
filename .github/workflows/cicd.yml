@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
   pull-requests: write
 
 concurrency:
@@ -24,10 +25,9 @@ concurrency:
 jobs:
   ci:
     uses: ./.github/workflows/reusable-ci.yml
-    secrets: inherit
 
   preview:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false && needs.ci.outputs.pulumi-enabled == 'true'
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) && needs.ci.outputs.pulumi-enabled == 'true'
     needs: ci
     uses: ./.github/workflows/reusable-cloudflare-worker.yml
     with:
@@ -39,11 +39,11 @@ jobs:
       cloud-url: ${{ needs.ci.outputs.pulumi-backend-url }}
       github-environment: preview
       comment-on-pr: true
-    secrets: inherit
+      source-ref: ${{ github.event.pull_request.head.sha }}
 
   preview-environment:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false && needs.ci.outputs.preview-environment-enabled == 'true'
-    needs: ci
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) && needs.ci.outputs.preview-environment-enabled == 'true'
+    needs: [ci, preview]
     uses: ./.github/workflows/reusable-cloudflare-worker.yml
     with:
       enabled: true
@@ -54,7 +54,8 @@ jobs:
       cloud-url: ${{ needs.ci.outputs.pulumi-backend-url }}
       github-environment: preview
       comment-on-pr: true
-    secrets: inherit
+      record-preview-cleanup: true
+      source-ref: ${{ github.event.pull_request.head.sha }}
 
   deploy-development:
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.ci.outputs.development-enabled == 'true') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'development' && needs.ci.outputs.development-enabled == 'true')
@@ -68,7 +69,6 @@ jobs:
       worker-name: ${{ format('{0}-dev', needs.ci.outputs.worker-prefix) }}
       cloud-url: ${{ needs.ci.outputs.pulumi-backend-url }}
       github-environment: development
-    secrets: inherit
 
   deploy-staging:
     if: (github.event_name == 'push' && github.ref == 'refs/heads/stg' && needs.ci.outputs.staging-enabled == 'true') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging' && needs.ci.outputs.staging-enabled == 'true')
@@ -82,7 +82,6 @@ jobs:
       worker-name: ${{ format('{0}-stg', needs.ci.outputs.worker-prefix) }}
       cloud-url: ${{ needs.ci.outputs.pulumi-backend-url }}
       github-environment: staging
-    secrets: inherit
 
   deploy-production:
     if: (github.event_name == 'push' && github.ref == 'refs/heads/prod' && needs.ci.outputs.production-enabled == 'true') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'production' && needs.ci.outputs.production-enabled == 'true')
@@ -96,4 +95,3 @@ jobs:
       worker-name: ${{ format('{0}-prod', needs.ci.outputs.worker-prefix) }}
       cloud-url: ${{ needs.ci.outputs.pulumi-backend-url }}
       github-environment: production
-    secrets: inherit
