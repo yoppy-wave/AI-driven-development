@@ -23,6 +23,10 @@ build/
 coverage/
 *.tsbuildinfo
 
+# Pulumi local backend state, plugin cache, and command metadata
+.pulumi/
+*.pulumi.*.json
+
 # OS and logs
 .DS_Store
 Thumbs.db

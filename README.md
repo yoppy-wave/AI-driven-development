@@ -4,6 +4,23 @@ WSL2のUbuntuにDocker Engineを直接インストールし、VS Code Dev Contai
 
 Dockerfileは言語・OSツール、`devcontainer.json`はNode.jsの追加、拡張機能、エディター設定を担当します。初回はフォルダーを開いて **Reopen in Container（コンテナーで再度開く）** を選択してください。通常のフォルダーを開くだけではコンテナの作成や拡張機能の導入は始まりません。
 
+## Pulumi TypeScriptによるIaC開発の準備
+
+Dev ContainerにはPulumi CLIとNode.jsを含めています。Pulumi CLIのバージョンはリポジトリルートの[`.pulumi.version`](.pulumi.version)で固定しており、Dev Containerと将来追加するGitHub Actionsは同じファイルを参照します。コンテナを再ビルドした後、次で確認します。
+
+```bash
+pulumi version
+node --version
+```
+
+このテンプレートは特定クラウドに依存しません。AWS、Azure、GCP、CloudflareなどのProviderやクラウドCLIは事前導入していないため、対象クラウド、必要なサービス、組織の権限・ネットワーク・コスト要件を決めてから、対象IaCプロジェクトの`package.json`へ必要最小限のProviderを追加します。TypeScriptプロジェクトの依存関係はロックファイルとともに管理します。
+
+Stateは開発・検証・本番などのStackごとに分け、Pulumi Cloudまたは組織管理のリモートバックエンドで保護します。ローカルの`.pulumi/`とローカルStateはGit管理しません。認証情報、トークン、接続文字列、秘密鍵はコードや非暗号化設定へ書かず、Pulumi Secret、組織承認済みのSecrets Provider、またはCIのSecretsを利用します。
+
+リソースへ変更を加える前に、対象Stack、バックエンド、クラウドアカウントまたはテナント、リージョンを確認し、`pulumi preview --diff`で差分を確認します。明示的な承認なしに`pulumi up`、`pulumi destroy`、`pulumi refresh`、State操作は実行しません。`destroy`では削除対象、依存関係、保護設定、データのバックアップと復旧手順を確認します。
+
+将来GitHub ActionsでPulumiを実行する場合は、公式`pulumi/actions`の`pulumi-version-file: .pulumi.version`を指定し、Dev Containerと同一のCLIバージョンを使用します。認証情報と`PULUMI_CONFIG_PASSPHRASE`などの機密値はGitHub Secretsで渡します。Provider固有のルールは、必要になった時点で`.github/instructions/`と`.cline/rules/`へ対象Provider専用ファイルとして追加します。
+
 ## 初回の準備
 
 ### 1. WSL2・UbuntuとVS Code
