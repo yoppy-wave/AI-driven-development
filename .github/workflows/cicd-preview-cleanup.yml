@@ -10,7 +10,8 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: cicd-${{ github.event.pull_request.number }}
+  group: preview-${{ github.event.pull_request.number }}
+  queue: max
   cancel-in-progress: false
 
 jobs:
@@ -22,12 +23,15 @@ jobs:
       backend-url: ${{ steps.target.outputs.backend_url }}
       stack-name: ${{ steps.target.outputs.stack_name }}
       worker-name: ${{ steps.target.outputs.worker_name }}
+      project-name: ${{ steps.target.outputs.project_name }}
       source-ref: ${{ steps.target.outputs.source_ref }}
+      comment-id: ${{ steps.target.outputs.comment_id }}
     steps:
       - name: Check out CI/CD cleanup helper
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          # Keep the helper aligned with the workflow revision; never check out PR head code here.
+          ref: ${{ github.workflow_sha }}
           persist-credentials: false
 
       - name: Recover recorded preview cleanup target
@@ -49,7 +53,10 @@ jobs:
       work-directory: ${{ needs.cleanup-target.outputs.work-directory }}
       stack-name: ${{ needs.cleanup-target.outputs.stack-name }}
       worker-name: ${{ needs.cleanup-target.outputs.worker-name }}
+      project-name: ${{ needs.cleanup-target.outputs.project-name }}
       source-ref: ${{ needs.cleanup-target.outputs.source-ref }}
+      cleanup-comment-id: ${{ needs.cleanup-target.outputs.comment-id }}
+      expected-pr-state: closed
       cloud-url: ${{ needs.cleanup-target.outputs.backend-url }}
       github-environment: preview
       comment-on-pr: true

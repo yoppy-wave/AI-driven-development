@@ -9,6 +9,9 @@ on:
       pulumi-work-directory:
         description: Directory containing the Pulumi project.
         value: ${{ jobs.ci.outputs.pulumi-work-directory }}
+      pulumi-project-name:
+        description: Name declared by Pulumi.yaml.
+        value: ${{ jobs.ci.outputs.pulumi-project-name }}
       pulumi-backend-url:
         description: Optional Pulumi backend URL.
         value: ${{ jobs.ci.outputs.pulumi-backend-url }}
@@ -41,6 +44,7 @@ jobs:
     outputs:
       pulumi-enabled: ${{ steps.config.outputs.pulumi_enabled }}
       pulumi-work-directory: ${{ steps.config.outputs.pulumi_work_directory }}
+      pulumi-project-name: ${{ steps.config.outputs.pulumi_project_name }}
       pulumi-backend-url: ${{ steps.config.outputs.pulumi_backend_url }}
       stack-prefix: ${{ steps.config.outputs.stack_prefix }}
       worker-prefix: ${{ steps.config.outputs.worker_prefix }}

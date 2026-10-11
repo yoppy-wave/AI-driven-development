@@ -19,27 +19,60 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: cicd-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: preview-${{ github.event.pull_request.number || github.ref }}
+  # The deploy gate skips stale runs; queueing keeps up and close cleanup mutually exclusive.
+  queue: max
+  cancel-in-progress: false
 
 jobs:
   ci:
     uses: ./.github/workflows/reusable-ci.yml
 
-  preview:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) && needs.ci.outputs.pulumi-enabled == 'true'
+  preview-locator:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) && needs.ci.outputs.pulumi-enabled == 'true' && needs.ci.outputs.preview-environment-enabled == 'true'
     needs: ci
+    runs-on: ubuntu-24.04
+    outputs:
+      found: ${{ steps.target.outputs.found }}
+      comment-id: ${{ steps.target.outputs.comment_id }}
+    steps:
+      - name: Check out preview cleanup helper
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+
+      - name: Recover and validate preview cleanup locator
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate --slurp "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            | python .github/scripts/preview_cleanup.py github-output \
+              --pull-request '${{ github.event.pull_request.number }}' \
+              --work-directory '${{ needs.ci.outputs.pulumi-work-directory }}' \
+              --project-name '${{ needs.ci.outputs.pulumi-project-name }}' \
+              --stack-name '${{ format('{0}-pr-{1}', needs.ci.outputs.stack-prefix, github.event.pull_request.number) }}' \
+              --worker-name '${{ format('{0}-pr-{1}', needs.ci.outputs.worker-prefix, github.event.pull_request.number) }}' \
+              --backend-url '${{ needs.ci.outputs.pulumi-backend-url }}' \
+            >> "$GITHUB_OUTPUT"
+
+  preview:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) && needs.ci.result == 'success' && needs.ci.outputs.pulumi-enabled == 'true' && needs.ci.outputs.preview-environment-enabled == 'true'
+    needs: [ci, preview-locator]
     uses: ./.github/workflows/reusable-cloudflare-worker.yml
     with:
       enabled: true
       operation: preview
       work-directory: ${{ needs.ci.outputs.pulumi-work-directory }}
+      project-name: ${{ needs.ci.outputs.pulumi-project-name }}
       stack-name: ${{ format('{0}-pr-{1}', needs.ci.outputs.stack-prefix, github.event.pull_request.number) }}
       worker-name: ${{ format('{0}-pr-{1}', needs.ci.outputs.worker-prefix, github.event.pull_request.number) }}
       cloud-url: ${{ needs.ci.outputs.pulumi-backend-url }}
       github-environment: preview
       comment-on-pr: true
       source-ref: ${{ github.event.pull_request.head.sha }}
+      expected-pr-state: open
     secrets:
       PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
       PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
@@ -48,20 +81,23 @@ jobs:
       CLOUDFLARE_WORKERS_DEV_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_DEV_SUBDOMAIN }}
 
   preview-environment:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) && needs.ci.outputs.preview-environment-enabled == 'true'
-    needs: [ci, preview]
+    if: needs.preview.result == 'success'
+    needs: [ci, preview-locator, preview]
     uses: ./.github/workflows/reusable-cloudflare-worker.yml
     with:
       enabled: true
       operation: up
       work-directory: ${{ needs.ci.outputs.pulumi-work-directory }}
+      project-name: ${{ needs.ci.outputs.pulumi-project-name }}
       stack-name: ${{ format('{0}-pr-{1}', needs.ci.outputs.stack-prefix, github.event.pull_request.number) }}
       worker-name: ${{ format('{0}-pr-{1}', needs.ci.outputs.worker-prefix, github.event.pull_request.number) }}
       cloud-url: ${{ needs.ci.outputs.pulumi-backend-url }}
       github-environment: preview
       comment-on-pr: true
       record-preview-cleanup: true
+      cleanup-comment-id: ${{ needs.preview-locator.outputs.comment-id }}
       source-ref: ${{ github.event.pull_request.head.sha }}
+      expected-pr-state: open
     secrets:
       PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
       PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
@@ -77,6 +113,7 @@ jobs:
       enabled: true
       operation: up
       work-directory: ${{ needs.ci.outputs.pulumi-work-directory }}
+      project-name: ${{ needs.ci.outputs.pulumi-project-name }}
       stack-name: ${{ format('{0}-dev', needs.ci.outputs.stack-prefix) }}
       worker-name: ${{ format('{0}-dev', needs.ci.outputs.worker-prefix) }}
       cloud-url: ${{ needs.ci.outputs.pulumi-backend-url }}
@@ -96,6 +133,7 @@ jobs:
       enabled: true
       operation: up
       work-directory: ${{ needs.ci.outputs.pulumi-work-directory }}
+      project-name: ${{ needs.ci.outputs.pulumi-project-name }}
       stack-name: ${{ format('{0}-stg', needs.ci.outputs.stack-prefix) }}
       worker-name: ${{ format('{0}-stg', needs.ci.outputs.worker-prefix) }}
       cloud-url: ${{ needs.ci.outputs.pulumi-backend-url }}
@@ -115,6 +153,7 @@ jobs:
       enabled: true
       operation: up
       work-directory: ${{ needs.ci.outputs.pulumi-work-directory }}
+      project-name: ${{ needs.ci.outputs.pulumi-project-name }}
       stack-name: ${{ format('{0}-prod', needs.ci.outputs.stack-prefix) }}
       worker-name: ${{ format('{0}-prod', needs.ci.outputs.worker-prefix) }}
       cloud-url: ${{ needs.ci.outputs.pulumi-backend-url }}

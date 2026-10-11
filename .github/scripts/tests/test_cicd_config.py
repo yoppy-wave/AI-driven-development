@@ -66,11 +66,18 @@ class CicdConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must contain Pulumi.yaml"):
             cicd_config.load(self.config_path)
 
+    def test_enabled_pulumi_exposes_the_manifest_project_name(self) -> None:
+        config = self.valid()
+        config["pulumi"]["enabled"] = True
+        self.write(config, with_project=True)
+        self.assertEqual(cicd_config.values(cicd_config.load(self.config_path), root=self.root)["pulumi_project_name"], "example")
+
     def test_preview_names_are_scoped_to_pull_request(self) -> None:
         config = self.valid()
         output = cicd_config.values(config, 42)
         self.assertEqual(output["preview_stack"], "example-pr-42")
         self.assertEqual(output["preview_worker_name"], "example-pr-42")
+        self.assertEqual(output["pulumi_project_name"], "")
 
 
 if __name__ == "__main__":
