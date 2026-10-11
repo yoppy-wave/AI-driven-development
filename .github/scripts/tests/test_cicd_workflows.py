@@ -35,6 +35,10 @@ class CicdWorkflowTests(unittest.TestCase):
         self.assertIn("cleanup-comment-id:", adapter)
         self.assertIn("value: ${{ jobs.pulumi.outputs.cleanup-comment-id }}", adapter)
         self.assertIn("cleanup-comment-id: ${{ steps.cleanup-target.outputs.cleanup-comment-id }}", adapter)
+        self.assertIn(
+            "inputs.record-preview-cleanup && inputs.operation != 'preview' && inputs.operation != 'up'",
+            adapter,
+        )
 
     def test_update_and_close_cleanup_share_a_queued_pr_lock(self) -> None:
         for content in (workflow("cicd.yml"), workflow("cicd-preview-cleanup.yml")):
