@@ -73,7 +73,8 @@ def validate(config: dict[str, object], root: Path = ROOT) -> dict[str, object]:
         fail("pulumi.stackPrefix must use lowercase letters, digits, and hyphens, start with a letter, and be at most 63 characters")
     if preview_enabled and not enabled:
         fail("pulumi.previewEnvironmentEnabled requires pulumi.enabled to be true")
-    if enabled and not (root / work_directory / "Pulumi.yaml").is_file():
+    project_path = root / work_directory / "Pulumi.yaml"
+    if enabled and not project_path.is_file():
         fail("pulumi.workDirectory must contain Pulumi.yaml when pulumi.enabled is true")
 
     deployments = required_object(config.get("deployments"), "deployments")
@@ -85,7 +86,20 @@ def validate(config: dict[str, object], root: Path = ROOT) -> dict[str, object]:
     return config
 
 
-def values(config: dict[str, object], pull_request: int | None = None) -> dict[str, str]:
+def project_name(config: dict[str, object], root: Path = ROOT) -> str:
+    pulumi = required_object(config["pulumi"], "pulumi")
+    if not bool(pulumi["enabled"]):
+        return ""
+    manifest = root / str(pulumi["workDirectory"]) / "Pulumi.yaml"
+    for line in manifest.read_text(encoding="utf-8").splitlines():
+        if line.startswith("name:"):
+            name = line.partition(":")[2].strip()
+            if name:
+                return name
+    fail("Pulumi.yaml must declare a non-empty name")
+
+
+def values(config: dict[str, object], pull_request: int | None = None, root: Path = ROOT) -> dict[str, str]:
     application = required_object(config["application"], "application")
     ci = required_object(config["ci"], "ci")
     pulumi = required_object(config["pulumi"], "pulumi")
@@ -96,6 +110,7 @@ def values(config: dict[str, object], pull_request: int | None = None) -> dict[s
         "ci_enabled": str(ci["enabled"]).lower(),
         "pulumi_enabled": str(pulumi["enabled"]).lower(),
         "pulumi_work_directory": str(pulumi["workDirectory"]),
+        "pulumi_project_name": project_name(config, root),
         "pulumi_backend_url": str(pulumi["backendUrl"]),
         "stack_prefix": str(pulumi["stackPrefix"]),
         "preview_environment_enabled": str(pulumi["previewEnvironmentEnabled"]).lower(),
