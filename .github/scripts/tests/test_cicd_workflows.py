@@ -22,10 +22,19 @@ class CicdWorkflowTests(unittest.TestCase):
 
     def test_preview_updates_one_stack_without_destroying_on_push(self) -> None:
         content = workflow("cicd.yml")
+        adapter = workflow("reusable-cloudflare-worker.yml")
         self.assertIn("  preview-locator:\n", content)
         self.assertNotIn("cleanup-previous-preview", content)
         self.assertNotIn("operation: destroy", content)
-        self.assertIn("cleanup-comment-id: ${{ needs.preview-locator.outputs.comment-id }}", content)
+        preview = content[content.index("  preview:\n") : content.index("  preview-environment:\n")]
+        up = content[content.index("  preview-environment:\n") : content.index("  deploy-development:\n")]
+        self.assertIn("record-preview-cleanup: true", preview)
+        self.assertIn("cleanup-comment-id: ${{ needs.preview-locator.outputs.comment-id }}", preview)
+        self.assertIn("record-preview-cleanup: true", up)
+        self.assertIn("cleanup-comment-id: ${{ needs.preview.outputs.cleanup-comment-id }}", up)
+        self.assertIn("cleanup-comment-id:", adapter)
+        self.assertIn("value: ${{ jobs.pulumi.outputs.cleanup-comment-id }}", adapter)
+        self.assertIn("cleanup-comment-id: ${{ steps.cleanup-target.outputs.cleanup-comment-id }}", adapter)
 
     def test_update_and_close_cleanup_share_a_queued_pr_lock(self) -> None:
         for content in (workflow("cicd.yml"), workflow("cicd-preview-cleanup.yml")):
@@ -105,6 +114,15 @@ class CicdWorkflowTests(unittest.TestCase):
         adapter = workflow("reusable-cloudflare-worker.yml")
         self.assertIn("CLEANUP_STATUS: ${{ inputs.record-preview-cleanup && 'active' || 'destroyed' }}", adapter)
         self.assertGreater(adapter.index("Mark cleanup locator complete"), adapter.index("Run Pulumi ${{ inputs.operation }}"))
+
+    def test_preview_locator_stays_pending_until_up_and_smoke_test_succeed(self) -> None:
+        adapter = workflow("reusable-cloudflare-worker.yml")
+        record = adapter.index("Record pending preview cleanup target")
+        pulumi = adapter.index("Run Pulumi ${{ inputs.operation }}")
+        complete = adapter.index("Mark cleanup locator complete")
+        self.assertLess(record, pulumi)
+        self.assertLess(pulumi, complete)
+        self.assertIn("inputs.operation == 'up' && inputs.record-preview-cleanup", adapter[complete : complete + 260])
 
     def test_legacy_locator_values_flow_from_close_recovery_to_destroy(self) -> None:
         cleanup = workflow("cicd-preview-cleanup.yml")

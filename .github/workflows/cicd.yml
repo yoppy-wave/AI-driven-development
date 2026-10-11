@@ -71,6 +71,8 @@ jobs:
       cloud-url: ${{ needs.ci.outputs.pulumi-backend-url }}
       github-environment: preview
       comment-on-pr: true
+      record-preview-cleanup: true
+      cleanup-comment-id: ${{ needs.preview-locator.outputs.comment-id }}
       source-ref: ${{ github.event.pull_request.head.sha }}
       expected-pr-state: open
     secrets:
@@ -95,7 +97,7 @@ jobs:
       github-environment: preview
       comment-on-pr: true
       record-preview-cleanup: true
-      cleanup-comment-id: ${{ needs.preview-locator.outputs.comment-id }}
+      cleanup-comment-id: ${{ needs.preview.outputs.cleanup-comment-id }}
       source-ref: ${{ github.event.pull_request.head.sha }}
       expected-pr-state: open
     secrets:

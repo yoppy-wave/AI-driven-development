@@ -2,6 +2,10 @@ name: Reusable Cloudflare Worker deployment
 
 on:
   workflow_call:
+    outputs:
+      cleanup-comment-id:
+        description: Preview cleanup locator recorded before a Pulumi operation that may create a stack.
+        value: ${{ jobs.pulumi.outputs.cleanup-comment-id }}
     inputs:
       enabled:
         description: Whether this operation is permitted by repository configuration.
@@ -57,7 +61,7 @@ on:
         type: boolean
         default: false
       record-preview-cleanup:
-        description: Create or update a pending cleanup locator before a Pulumi up operation.
+        description: Create or update a pending cleanup locator before a Pulumi operation that may create a stack.
         required: false
         type: boolean
         default: false
@@ -94,6 +98,8 @@ jobs:
     timeout-minutes: 30
     environment:
       name: ${{ inputs.github-environment }}
+    outputs:
+      cleanup-comment-id: ${{ steps.cleanup-target.outputs.cleanup-comment-id }}
     steps:
       - name: Reject unsupported operation
         if: inputs.operation != 'preview' && inputs.operation != 'up' && inputs.operation != 'destroy'
@@ -173,6 +179,7 @@ jobs:
         run: npm ci
 
       - name: Record pending preview cleanup target
+        id: cleanup-target
         if: env.PREVIEW_OPERATION_ALLOWED != 'false' && inputs.record-preview-cleanup
         env:
           GH_TOKEN: ${{ github.token }}
@@ -194,6 +201,7 @@ jobs:
             comment_id="$(gh api --method POST "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" -f body="$body" --jq '.id')"
           fi
           echo "CLEANUP_COMMENT_ID=$comment_id" >> "$GITHUB_ENV"
+          echo "cleanup-comment-id=$comment_id" >> "$GITHUB_OUTPUT"
 
       - name: Reconfirm pull request immediately before Pulumi
         if: env.PREVIEW_OPERATION_ALLOWED != 'false' && inputs.expected-pr-state != ''
@@ -253,7 +261,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Mark cleanup locator complete
-        if: env.PREVIEW_OPERATION_ALLOWED != 'false' && (inputs.record-preview-cleanup || inputs.cleanup-comment-id != '')
+        if: env.PREVIEW_OPERATION_ALLOWED != 'false' && ((inputs.operation == 'up' && inputs.record-preview-cleanup) || inputs.cleanup-comment-id != '')
         env:
           GH_TOKEN: ${{ github.token }}
           EXISTING_CLEANUP_COMMENT_ID: ${{ inputs.cleanup-comment-id }}
