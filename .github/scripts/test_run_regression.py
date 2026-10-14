@@ -1,18 +1,16 @@
-"""Regression runner must not silently skip new application projects."""
+"""Regression checks for run_regression helpers."""
 
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import run_regression  # noqa: E402
+import run_regression
 
 
 class DiscoveryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(
-            dir=Path(__file__).resolve().parents[3]
+            dir=Path(__file__).resolve().parents[2]
         )
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -30,7 +28,7 @@ class DiscoveryTests(unittest.TestCase):
         self.write("backend/src/backend.py", "def calculate(): return 1")
         with self.assertRaisesRegex(RuntimeError, "has no test"):
             run_regression.discover(self.root)
-        self.write("backend/tests/test_backend.py", "def test_calculate(): assert True")
+        self.write("backend/src/test_backend.py", "def test_calculate(): assert True")
         self.assertEqual(run_regression.discover(self.root)[0], [Path("backend")])
 
     def test_unregistered_python_source_fails(self) -> None:
