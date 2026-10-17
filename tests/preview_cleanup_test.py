@@ -4,7 +4,7 @@ import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / ".github" / "scripts"))
 import preview_cleanup  # noqa: E402
 
 SHA_A = "a" * 40

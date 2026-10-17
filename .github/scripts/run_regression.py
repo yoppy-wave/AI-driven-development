@@ -31,9 +31,7 @@ def nearest_project(path: Path, projects: set[Path]) -> Path | None:
 
 
 def test_file(path: Path) -> bool:
-    return path.suffix == ".py" and (
-        path.name.startswith("test_") or path.name.endswith("_test.py")
-    )
+    return path.name.endswith("_test.py")
 
 
 def discover(root: Path) -> tuple[list[Path], list[Path]]:
@@ -50,7 +48,7 @@ def discover(root: Path) -> tuple[list[Path], list[Path]]:
     }
     for project in python_roots:
         if not any(test_file(path) and nearest_project(path, python_roots) == project for path in files):
-            raise RuntimeError(f"Python project {project} has no test_*.py or *_test.py tests")
+            raise RuntimeError(f"Python project {project} has no *_test.py tests")
     for project in node_roots:
         package = json.loads((root / project / "package.json").read_text(encoding="utf-8"))
         if not isinstance(package.get("scripts", {}).get("test"), str):
@@ -109,11 +107,6 @@ def node_project(root: Path, project: Path) -> None:
 def main() -> None:
     root = Path(__file__).resolve().parents[2]
     python_roots, node_roots = discover(root)
-    helper_tests = root / ".github" / "scripts"
-    run([sys.executable, "-m", "unittest", "discover", "-s", str(helper_tests), "-p", "test_*.py"], root)
-
-    if python_roots:
-        run([sys.executable, "-m", "pip", "install", "pytest"], root)
     for project in python_roots:
         python_project(root, project)
     for project in node_roots:

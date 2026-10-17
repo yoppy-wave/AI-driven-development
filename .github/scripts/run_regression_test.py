@@ -26,9 +26,9 @@ class DiscoveryTests(unittest.TestCase):
     def test_python_project_requires_tests(self) -> None:
         self.write("backend/pyproject.toml", "[project]\nname = 'backend'\nversion = '0.1'\n")
         self.write("backend/src/backend.py", "def calculate(): return 1")
-        with self.assertRaisesRegex(RuntimeError, "has no test"):
+        with self.assertRaisesRegex(RuntimeError, r"has no \*_test\.py tests"):
             run_regression.discover(self.root)
-        self.write("backend/src/test_backend.py", "def test_calculate(): assert True")
+        self.write("backend/src/backend_test.py", "def test_calculate(): assert True")
         self.assertEqual(run_regression.discover(self.root)[0], [Path("backend")])
 
     def test_unregistered_python_source_fails(self) -> None:
