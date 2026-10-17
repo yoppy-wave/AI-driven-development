@@ -53,67 +53,43 @@ def validate(config: dict[str, object], root: Path = ROOT) -> dict[str, object]:
 
     application = required_object(config.get("application"), "application")
     name = required_string(application, "name", "application")
-    worker_prefix = required_string(application, "workerPrefix", "application")
-    for field, value in (("application.name", name), ("application.workerPrefix", worker_prefix)):
-        if not NAME_PATTERN.fullmatch(value):
-            fail(f"{field} must use lowercase letters, digits, and hyphens, start with a letter, and be at most 63 characters")
+    if name != "app":
+        fail("application.name must be app so CDK and cleanup use the same stack namespace")
 
     ci = required_object(config.get("ci"), "ci")
     required_bool(ci, "enabled", "ci")
 
-    pulumi = required_object(config.get("pulumi"), "pulumi")
-    enabled = required_bool(pulumi, "enabled", "pulumi")
-    work_directory = required_string(pulumi, "workDirectory", "pulumi")
-    backend_url = pulumi.get("backendUrl")
-    if not isinstance(backend_url, str):
-        fail("pulumi.backendUrl must be a string")
-    stack_prefix = required_string(pulumi, "stackPrefix", "pulumi")
-    preview_enabled = required_bool(pulumi, "previewEnvironmentEnabled", "pulumi")
-    if not NAME_PATTERN.fullmatch(stack_prefix):
-        fail("pulumi.stackPrefix must use lowercase letters, digits, and hyphens, start with a letter, and be at most 63 characters")
+    cdk = required_object(config.get("cdk"), "cdk")
+    enabled = required_bool(cdk, "enabled", "cdk")
+    region = required_string(cdk, "region", "cdk")
+    if not re.fullmatch(r"[a-z]{2}-[a-z]+-[0-9]+", region):
+        fail("cdk.region must be an AWS region identifier")
+    preview_enabled = required_bool(cdk, "previewEnvironmentEnabled", "cdk")
     if preview_enabled and not enabled:
-        fail("pulumi.previewEnvironmentEnabled requires pulumi.enabled to be true")
-    project_path = root / work_directory / "Pulumi.yaml"
-    if enabled and not project_path.is_file():
-        fail("pulumi.workDirectory must contain Pulumi.yaml when pulumi.enabled is true")
+        fail("cdk.previewEnvironmentEnabled requires cdk.enabled to be true")
+    if enabled and not (root / "cdk.json").is_file():
+        fail("cdk.json must exist when cdk.enabled is true")
 
     deployments = required_object(config.get("deployments"), "deployments")
     for environment in ("development", "staging", "production"):
         required_bool(deployments, environment, "deployments")
     if any(deployments.values()) and not enabled:
-        fail("enabled deployments require pulumi.enabled to be true")
+        fail("enabled deployments require cdk.enabled to be true")
 
     return config
-
-
-def project_name(config: dict[str, object], root: Path = ROOT) -> str:
-    pulumi = required_object(config["pulumi"], "pulumi")
-    if not bool(pulumi["enabled"]):
-        return ""
-    manifest = root / str(pulumi["workDirectory"]) / "Pulumi.yaml"
-    for line in manifest.read_text(encoding="utf-8").splitlines():
-        if line.startswith("name:"):
-            name = line.partition(":")[2].strip()
-            if name:
-                return name
-    fail("Pulumi.yaml must declare a non-empty name")
 
 
 def values(config: dict[str, object], pull_request: int | None = None, root: Path = ROOT) -> dict[str, str]:
     application = required_object(config["application"], "application")
     ci = required_object(config["ci"], "ci")
-    pulumi = required_object(config["pulumi"], "pulumi")
+    cdk = required_object(config["cdk"], "cdk")
     deployments = required_object(config["deployments"], "deployments")
     result = {
         "application_name": str(application["name"]),
-        "worker_prefix": str(application["workerPrefix"]),
         "ci_enabled": str(ci["enabled"]).lower(),
-        "pulumi_enabled": str(pulumi["enabled"]).lower(),
-        "pulumi_work_directory": str(pulumi["workDirectory"]),
-        "pulumi_project_name": project_name(config, root),
-        "pulumi_backend_url": str(pulumi["backendUrl"]),
-        "stack_prefix": str(pulumi["stackPrefix"]),
-        "preview_environment_enabled": str(pulumi["previewEnvironmentEnabled"]).lower(),
+        "cdk_enabled": str(cdk["enabled"]).lower(),
+        "cdk_region": str(cdk["region"]),
+        "preview_environment_enabled": str(cdk["previewEnvironmentEnabled"]).lower(),
         "development_enabled": str(deployments["development"]).lower(),
         "staging_enabled": str(deployments["staging"]).lower(),
         "production_enabled": str(deployments["production"]).lower(),
@@ -121,8 +97,7 @@ def values(config: dict[str, object], pull_request: int | None = None, root: Pat
     if pull_request is not None:
         if pull_request < 1:
             fail("pull request number must be positive")
-        result["preview_stack"] = f"{result['stack_prefix']}-pr-{pull_request}"
-        result["preview_worker_name"] = f"{result['worker_prefix']}-pr-{pull_request}"
+        result["preview_stack"] = f"app-pr-{pull_request}"
     return result
 
 

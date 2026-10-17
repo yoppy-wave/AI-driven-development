@@ -1,17 +1,14 @@
 {
   "version": 1,
   "application": {
-    "name": "example-worker",
-    "workerPrefix": "example-worker"
+    "name": "app"
   },
   "ci": {
     "enabled": true
   },
-  "pulumi": {
+  "cdk": {
     "enabled": false,
-    "workDirectory": "examples/cloudflare-worker/infra",
-    "backendUrl": "",
-    "stackPrefix": "example-worker",
+    "region": "us-east-1",
     "previewEnvironmentEnabled": false
   },
   "deployments": {

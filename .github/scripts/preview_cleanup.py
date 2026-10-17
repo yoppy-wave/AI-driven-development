@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Persist and recover immutable cleanup locators for PR preview environments."""
+"""Persist and recover immutable, stateful AWS preview cleanup records."""
 
 import argparse
 import json
@@ -7,12 +7,11 @@ import re
 import sys
 from typing import Any
 
-
-MARKER = "<!-- cicd-preview-cleanup:v1 "
+MARKER = "<!-- cicd-preview-cleanup:v2 "
 BOT_LOGIN = "github-actions[bot]"
-FIXED_FIELDS = ("work_directory", "project_name", "stack_name", "worker_name", "backend_url")
 COMMIT_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
-STATUSES = ("pending", "active", "destroyed")
+ACCOUNT_ID_PATTERN = re.compile(r"^[0-9]{12}$")
+STATUSES = ("pending", "active", "destroying", "destroyed")
 
 
 def fail(message: str) -> None:
@@ -21,38 +20,34 @@ def fail(message: str) -> None:
 
 def metadata(
     pull_request: int,
-    work_directory: str,
-    project_name: str,
     stack_name: str,
-    worker_name: str,
-    backend_url: str,
+    region: str,
     source_ref: str,
+    workflow_ref: str,
+    account_id: str = "",
     status: str = "pending",
 ) -> dict[str, str]:
     if pull_request < 1:
         fail("pull request number must be positive")
-    values = {
-        "work_directory": work_directory,
-        "project_name": project_name,
-        "stack_name": stack_name,
-        "worker_name": worker_name,
-        "backend_url": backend_url,
-        "source_ref": source_ref,
-        "status": status,
-    }
-    for field in FIXED_FIELDS:
-        if not isinstance(values[field], str) or (field != "backend_url" and not values[field]):
-            fail(f"{field} must be a non-empty string")
-    if work_directory.startswith("/") or ".." in work_directory.split("/"):
-        fail("work_directory must be a repository-relative path without parent traversal")
-    suffix = f"-pr-{pull_request}"
-    if not stack_name.endswith(suffix) or not worker_name.endswith(suffix):
-        fail("preview stack and worker names must end with the pull request suffix")
-    if not isinstance(source_ref, str) or not COMMIT_SHA_PATTERN.fullmatch(source_ref):
-        fail("source_ref must be a full commit SHA")
+    if stack_name != f"app-pr-{pull_request}":
+        fail("preview stack name must exactly match the pull request stack name")
+    if not re.fullmatch(r"[a-z]{2}-[a-z]+-[0-9]+", region):
+        fail("region must be an AWS region identifier")
+    for field, value in (("source_ref", source_ref), ("workflow_ref", workflow_ref)):
+        if not isinstance(value, str) or not COMMIT_SHA_PATTERN.fullmatch(value):
+            fail(f"{field} must be a full commit SHA")
+    if account_id and not ACCOUNT_ID_PATTERN.fullmatch(account_id):
+        fail("account_id must be a 12-digit AWS account ID when present")
     if status not in STATUSES:
         fail(f"status must be one of: {', '.join(STATUSES)}")
-    return values
+    return {
+        "stack_name": stack_name,
+        "region": region,
+        "source_ref": source_ref,
+        "workflow_ref": workflow_ref,
+        "account_id": account_id,
+        "status": status,
+    }
 
 
 def comment_body(values: dict[str, str]) -> str:
@@ -71,12 +66,11 @@ def metadata_from_comment(body: object, login: object, pull_request: int) -> dic
     try:
         return metadata(
             pull_request,
-            values.get("work_directory"),
-            values.get("project_name", "legacy-project"),
             values.get("stack_name"),
-            values.get("worker_name"),
-            values.get("backend_url"),
+            values.get("region"),
             values.get("source_ref"),
+            values.get("workflow_ref"),
+            values.get("account_id", ""),
             values.get("status", "pending"),
         )
     except ValueError:
@@ -87,7 +81,9 @@ def latest_target(comments: list[dict[str, Any]], pull_request: int) -> dict[str
     for comment in reversed(comments):
         values = metadata_from_comment(comment.get("body"), comment.get("user", {}).get("login"), pull_request)
         comment_id = comment.get("id")
-        if values is not None and values["status"] != "destroyed" and isinstance(comment_id, int):
+        if values is not None and isinstance(comment_id, int):
+            if values["status"] == "destroyed":
+                return None
             return {**values, "comment_id": str(comment_id)}
     return None
 
@@ -105,28 +101,18 @@ def comment_pages(response: object) -> list[dict[str, Any]]:
     return comments
 
 
-def add_metadata_arguments(command: argparse.ArgumentParser, *, status: bool = True) -> None:
+def add_metadata_arguments(command: argparse.ArgumentParser) -> None:
     command.add_argument("--pull-request", required=True, type=int)
-    for argument in ("work-directory", "project-name", "stack-name", "worker-name", "backend-url", "source-ref"):
-        command.add_argument(f"--{argument}", required=True)
-    if status:
-        command.add_argument("--status", required=True, choices=STATUSES)
+    command.add_argument("--stack-name", required=True)
+    command.add_argument("--region", required=True)
+    command.add_argument("--source-ref", required=True)
+    command.add_argument("--workflow-ref", required=True)
+    command.add_argument("--account-id", default="")
+    command.add_argument("--status", required=True, choices=STATUSES)
 
 
-def metadata_from_args(args: argparse.Namespace) -> dict[str, str]:
-    return metadata(
-        args.pull_request, args.work_directory, args.project_name, args.stack_name, args.worker_name,
-        args.backend_url, args.source_ref, args.status,
-    )
-
-
-def emit_target(target: dict[str, str] | None) -> None:
-    if target is None:
-        print("found=false")
-        return
-    print("found=true")
-    for field, value in target.items():
-        print(f"{field}={value}")
+def values_from_args(args: argparse.Namespace) -> dict[str, str]:
+    return metadata(args.pull_request, args.stack_name, args.region, args.source_ref, args.workflow_ref, args.account_id, args.status)
 
 
 def main() -> None:
@@ -138,31 +124,17 @@ def main() -> None:
     add_metadata_arguments(record)
     add_metadata_arguments(update)
     extract.add_argument("--pull-request", required=True, type=int)
-    extract.add_argument("--work-directory")
-    extract.add_argument("--project-name")
-    extract.add_argument("--stack-name")
-    extract.add_argument("--worker-name")
-    extract.add_argument("--backend-url")
     args = parser.parse_args()
-
     if args.command in ("record-body", "update-body"):
-        print(comment_body(metadata_from_args(args)))
+        print(comment_body(values_from_args(args)))
         return
-
     target = latest_target(comment_pages(json.load(sys.stdin)), args.pull_request)
-    if target is not None:
-        expected = {
-            "work_directory": args.work_directory,
-            "project_name": args.project_name,
-            "stack_name": args.stack_name,
-            "worker_name": args.worker_name,
-            "backend_url": args.backend_url,
-        }
-        supplied = {field: value for field, value in expected.items() if value is not None}
-        drift = [field for field, value in supplied.items() if target[field] != value]
-        if drift:
-            fail("preview cleanup locator differs from current configuration: " + ", ".join(drift))
-    emit_target(target)
+    if target is None:
+        print("found=false")
+        return
+    print("found=true")
+    for field, value in target.items():
+        print(f"{field}={value}")
 
 
 if __name__ == "__main__":

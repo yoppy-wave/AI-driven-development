@@ -1,0 +1,135 @@
+name: Reusable AWS CDK deployment
+
+on:
+  workflow_call:
+    inputs:
+      enabled:
+        description: "Whether the CI/CD configuration permits this AWS operation."
+        required: true
+        type: boolean
+      operation:
+        description: "CDK command to run: diff or deploy."
+        required: true
+        type: string
+      stack-name:
+        description: "Target CDK stack name."
+        required: true
+        type: string
+      stack-environment:
+        description: "CDK context environment, such as development or pr-123."
+        required: true
+        type: string
+      region:
+        description: "AWS region for the target stack."
+        required: true
+        type: string
+      github-environment:
+        description: "GitHub Environment used for approvals and environment secrets."
+        required: true
+        type: string
+      source-ref:
+        description: "Immutable source commit for a preview operation."
+        required: false
+        type: string
+        default: ""
+      expected-pr-state:
+        description: "Required PR state before each preview AWS operation."
+        required: false
+        type: string
+        default: ""
+      record-preview-cleanup:
+        description: "Record a pending cleanup target before preview deployment."
+        required: false
+        type: boolean
+        default: false
+      trusted-workflow-ref:
+        description: "Immutable base-branch revision of the trusted cleanup management code."
+        required: false
+        type: string
+        default: ""
+    secrets:
+      AWS_ROLE_TO_ASSUME:
+        description: "OIDC role ARN. A same-named Environment Secret takes precedence."
+        required: false
+
+jobs:
+  cdk:
+    if: inputs.enabled
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: ${{ inputs.github-environment }}
+    steps:
+      - name: Reject unsupported operation
+        if: inputs.operation != 'diff' && inputs.operation != 'deploy'
+        run: exit 1
+      - name: Confirm pull request is current before checkout
+        if: inputs.expected-pr-state != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_STATE: ${{ inputs.expected-pr-state }}
+          SOURCE_REF: ${{ inputs.source-ref }}
+        run: |
+          pr="$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}")"
+          [[ "$(jq -r .state <<<"$pr")" == "$EXPECTED_STATE" ]]
+          [[ "$(jq -r .head.sha <<<"$pr")" == "$SOURCE_REF" ]]
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source-ref || github.sha }}
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Record pending preview cleanup target
+        id: cleanup
+        if: inputs.record-preview-cleanup
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          body="$(python .github/scripts/preview_cleanup.py record-body --pull-request '${{ github.event.pull_request.number }}' --stack-name '${{ inputs.stack-name }}' --region '${{ inputs.region }}' --source-ref '${{ inputs.source-ref }}' --workflow-ref '${{ inputs.trusted-workflow-ref }}' --status pending)"
+          comment_id="$(gh api --method POST "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" -f body="$body" --jq .id)"
+          echo "comment-id=$comment_id" >> "$GITHUB_OUTPUT"
+      - name: Confirm pull request is current before AWS operation
+        if: inputs.expected-pr-state != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_STATE: ${{ inputs.expected-pr-state }}
+          SOURCE_REF: ${{ inputs.source-ref }}
+        run: |
+          pr="$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}")"
+          [[ "$(jq -r .state <<<"$pr")" == "$EXPECTED_STATE" ]]
+          [[ "$(jq -r .head.sha <<<"$pr")" == "$SOURCE_REF" ]]
+      - name: Configure AWS credentials with OIDC
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ inputs.region }}
+      - name: Run CDK operation
+        env:
+          CDK_DEFAULT_REGION: ${{ inputs.region }}
+        run: |
+          if [[ '${{ inputs.operation }}' == diff ]]; then
+            npm run cdk -- diff '${{ inputs.stack-name }}' --context environment='${{ inputs.stack-environment }}' --no-color
+          else
+            npm run cdk -- deploy '${{ inputs.stack-name }}' --context environment='${{ inputs.stack-environment }}' --require-approval never
+          fi
+      - name: Mark preview cleanup target active
+        if: inputs.record-preview-cleanup
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_ID: ${{ steps.cleanup.outputs.comment-id }}
+        run: |
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          body="$(python .github/scripts/preview_cleanup.py update-body --pull-request '${{ github.event.pull_request.number }}' --stack-name '${{ inputs.stack-name }}' --region '${{ inputs.region }}' --source-ref '${{ inputs.source-ref }}' --workflow-ref '${{ inputs.trusted-workflow-ref }}' --account-id "$account_id" --status active)"
+          gh api --method PATCH "repos/${{ github.repository }}/issues/comments/$COMMENT_ID" -f body="$body"
+  skipped:
+    if: ${{ !inputs.enabled }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Publish skipped operation
+        run: echo 'AWS CDK operation skipped because this deployment path is disabled.' >> "$GITHUB_STEP_SUMMARY"
