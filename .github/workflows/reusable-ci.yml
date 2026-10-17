@@ -3,24 +3,12 @@ name: Reusable CI
 on:
   workflow_call:
     outputs:
-      pulumi-enabled:
-        description: Whether Pulumi operations are enabled by repository configuration.
-        value: ${{ jobs.ci.outputs.pulumi-enabled }}
-      pulumi-work-directory:
-        description: Directory containing the Pulumi project.
-        value: ${{ jobs.ci.outputs.pulumi-work-directory }}
-      pulumi-project-name:
-        description: Name declared by Pulumi.yaml.
-        value: ${{ jobs.ci.outputs.pulumi-project-name }}
-      pulumi-backend-url:
-        description: Optional Pulumi backend URL.
-        value: ${{ jobs.ci.outputs.pulumi-backend-url }}
-      stack-prefix:
-        description: Prefix for environment and preview stacks.
-        value: ${{ jobs.ci.outputs.stack-prefix }}
-      worker-prefix:
-        description: Prefix for Cloudflare Worker names in the minimal example.
-        value: ${{ jobs.ci.outputs.worker-prefix }}
+      cdk-enabled:
+        description: Whether AWS CDK operations are enabled by repository configuration.
+        value: ${{ jobs.ci.outputs.cdk-enabled }}
+      cdk-region:
+        description: AWS region configured for CDK deployments.
+        value: ${{ jobs.ci.outputs.cdk-region }}
       preview-environment-enabled:
         description: Whether PR preview environment updates are enabled.
         value: ${{ jobs.ci.outputs.preview-environment-enabled }}
@@ -42,12 +30,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     outputs:
-      pulumi-enabled: ${{ steps.config.outputs.pulumi_enabled }}
-      pulumi-work-directory: ${{ steps.config.outputs.pulumi_work_directory }}
-      pulumi-project-name: ${{ steps.config.outputs.pulumi_project_name }}
-      pulumi-backend-url: ${{ steps.config.outputs.pulumi_backend_url }}
-      stack-prefix: ${{ steps.config.outputs.stack_prefix }}
-      worker-prefix: ${{ steps.config.outputs.worker_prefix }}
+      cdk-enabled: ${{ steps.config.outputs.cdk_enabled }}
+      cdk-region: ${{ steps.config.outputs.cdk_region }}
       preview-environment-enabled: ${{ steps.config.outputs.preview_environment_enabled }}
       development-enabled: ${{ steps.config.outputs.development_enabled }}
       staging-enabled: ${{ steps.config.outputs.staging_enabled }}
@@ -81,7 +65,7 @@ jobs:
           {
             echo '## CI/CD configuration'
             echo
-            echo "- Pulumi: \\`${{ steps.config.outputs.pulumi_enabled }}\\`"
+            echo "- AWS CDK: \\`${{ steps.config.outputs.cdk_enabled }}\\`"
             echo "- Preview Environment: \\`${{ steps.config.outputs.preview_environment_enabled }}\\`"
             echo "- Development deployment: \\`${{ steps.config.outputs.development_enabled }}\\`"
             echo "- Staging deployment: \\`${{ steps.config.outputs.staging_enabled }}\\`"

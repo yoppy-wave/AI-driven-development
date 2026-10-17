@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: Environment to deploy when enabled by configuration.
+        description: "Environment to deploy when enabled by configuration."
         required: true
         type: choice
         options: [development, staging, production]
@@ -20,149 +20,102 @@ permissions:
 
 concurrency:
   group: preview-${{ github.event.pull_request.number || github.ref }}
-  # The deploy gate skips stale runs; queueing keeps up and close cleanup mutually exclusive.
-  queue: max
   cancel-in-progress: false
 
 jobs:
   ci:
     uses: ./.github/workflows/reusable-ci.yml
 
-  preview-locator:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) && needs.ci.outputs.pulumi-enabled == 'true' && needs.ci.outputs.preview-environment-enabled == 'true'
-    needs: ci
-    runs-on: ubuntu-24.04
-    outputs:
-      found: ${{ steps.target.outputs.found }}
-      comment-id: ${{ steps.target.outputs.comment_id }}
-    steps:
-      - name: Check out preview cleanup helper
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.workflow_sha }}
-          persist-credentials: false
-
-      - name: Recover and validate preview cleanup locator
-        id: target
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api --paginate --slurp "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
-            | python .github/scripts/preview_cleanup.py github-output \
-              --pull-request '${{ github.event.pull_request.number }}' \
-              --work-directory '${{ needs.ci.outputs.pulumi-work-directory }}' \
-              --project-name '${{ needs.ci.outputs.pulumi-project-name }}' \
-              --stack-name '${{ format('{0}-pr-{1}', needs.ci.outputs.stack-prefix, github.event.pull_request.number) }}' \
-              --worker-name '${{ format('{0}-pr-{1}', needs.ci.outputs.worker-prefix, github.event.pull_request.number) }}' \
-              --backend-url '${{ needs.ci.outputs.pulumi-backend-url }}' \
-            >> "$GITHUB_OUTPUT"
-
   preview:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) && needs.ci.result == 'success' && needs.ci.outputs.pulumi-enabled == 'true' && needs.ci.outputs.preview-environment-enabled == 'true'
-    needs: [ci, preview-locator]
-    uses: ./.github/workflows/reusable-cloudflare-worker.yml
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) && needs.ci.outputs.cdk-enabled == 'true'
+    needs: ci
+    permissions:
+      contents: read
+      id-token: write
+      issues: write
+      pull-requests: write
+    uses: ./.github/workflows/reusable-aws-cdk.yml
     with:
       enabled: true
-      operation: preview
-      work-directory: ${{ needs.ci.outputs.pulumi-work-directory }}
-      project-name: ${{ needs.ci.outputs.pulumi-project-name }}
-      stack-name: ${{ format('{0}-pr-{1}', needs.ci.outputs.stack-prefix, github.event.pull_request.number) }}
-      worker-name: ${{ format('{0}-pr-{1}', needs.ci.outputs.worker-prefix, github.event.pull_request.number) }}
-      cloud-url: ${{ needs.ci.outputs.pulumi-backend-url }}
+      operation: diff
+      stack-name: ${{ format('app-pr-{0}', github.event.pull_request.number) }}
+      stack-environment: ${{ format('pr-{0}', github.event.pull_request.number) }}
+      region: ${{ needs.ci.outputs.cdk-region }}
       github-environment: preview
-      comment-on-pr: true
-      record-preview-cleanup: true
-      cleanup-comment-id: ${{ needs.preview-locator.outputs.comment-id }}
       source-ref: ${{ github.event.pull_request.head.sha }}
       expected-pr-state: open
     secrets:
-      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
-      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      CLOUDFLARE_WORKERS_DEV_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_DEV_SUBDOMAIN }}
+      AWS_ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}
 
   preview-environment:
-    if: needs.preview.result == 'success'
-    needs: [ci, preview-locator, preview]
-    uses: ./.github/workflows/reusable-cloudflare-worker.yml
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) && needs.ci.outputs.preview-environment-enabled == 'true'
+    needs: [ci, preview]
+    permissions:
+      contents: read
+      id-token: write
+      issues: write
+      pull-requests: write
+    uses: ./.github/workflows/reusable-aws-cdk.yml
     with:
       enabled: true
-      operation: up
-      work-directory: ${{ needs.ci.outputs.pulumi-work-directory }}
-      project-name: ${{ needs.ci.outputs.pulumi-project-name }}
-      stack-name: ${{ format('{0}-pr-{1}', needs.ci.outputs.stack-prefix, github.event.pull_request.number) }}
-      worker-name: ${{ format('{0}-pr-{1}', needs.ci.outputs.worker-prefix, github.event.pull_request.number) }}
-      cloud-url: ${{ needs.ci.outputs.pulumi-backend-url }}
+      operation: deploy
+      stack-name: ${{ format('app-pr-{0}', github.event.pull_request.number) }}
+      stack-environment: ${{ format('pr-{0}', github.event.pull_request.number) }}
+      region: ${{ needs.ci.outputs.cdk-region }}
       github-environment: preview
-      comment-on-pr: true
-      record-preview-cleanup: true
-      cleanup-comment-id: ${{ needs.preview.outputs.cleanup-comment-id }}
       source-ref: ${{ github.event.pull_request.head.sha }}
       expected-pr-state: open
+      record-preview-cleanup: true
     secrets:
-      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
-      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      CLOUDFLARE_WORKERS_DEV_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_DEV_SUBDOMAIN }}
+      AWS_ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}
 
   deploy-development:
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.ci.outputs.development-enabled == 'true') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'development' && needs.ci.outputs.development-enabled == 'true')
     needs: ci
-    uses: ./.github/workflows/reusable-cloudflare-worker.yml
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/reusable-aws-cdk.yml
     with:
       enabled: true
-      operation: up
-      work-directory: ${{ needs.ci.outputs.pulumi-work-directory }}
-      project-name: ${{ needs.ci.outputs.pulumi-project-name }}
-      stack-name: ${{ format('{0}-dev', needs.ci.outputs.stack-prefix) }}
-      worker-name: ${{ format('{0}-dev', needs.ci.outputs.worker-prefix) }}
-      cloud-url: ${{ needs.ci.outputs.pulumi-backend-url }}
+      operation: deploy
+      stack-name: app-development
+      stack-environment: development
+      region: ${{ needs.ci.outputs.cdk-region }}
       github-environment: development
     secrets:
-      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
-      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      CLOUDFLARE_WORKERS_DEV_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_DEV_SUBDOMAIN }}
+      AWS_ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}
 
   deploy-staging:
     if: (github.event_name == 'push' && github.ref == 'refs/heads/stg' && needs.ci.outputs.staging-enabled == 'true') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging' && needs.ci.outputs.staging-enabled == 'true')
     needs: ci
-    uses: ./.github/workflows/reusable-cloudflare-worker.yml
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/reusable-aws-cdk.yml
     with:
       enabled: true
-      operation: up
-      work-directory: ${{ needs.ci.outputs.pulumi-work-directory }}
-      project-name: ${{ needs.ci.outputs.pulumi-project-name }}
-      stack-name: ${{ format('{0}-stg', needs.ci.outputs.stack-prefix) }}
-      worker-name: ${{ format('{0}-stg', needs.ci.outputs.worker-prefix) }}
-      cloud-url: ${{ needs.ci.outputs.pulumi-backend-url }}
+      operation: deploy
+      stack-name: app-staging
+      stack-environment: staging
+      region: ${{ needs.ci.outputs.cdk-region }}
       github-environment: staging
     secrets:
-      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
-      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      CLOUDFLARE_WORKERS_DEV_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_DEV_SUBDOMAIN }}
+      AWS_ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}
 
   deploy-production:
     if: (github.event_name == 'push' && github.ref == 'refs/heads/prod' && needs.ci.outputs.production-enabled == 'true') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'production' && needs.ci.outputs.production-enabled == 'true')
     needs: ci
-    uses: ./.github/workflows/reusable-cloudflare-worker.yml
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/reusable-aws-cdk.yml
     with:
       enabled: true
-      operation: up
-      work-directory: ${{ needs.ci.outputs.pulumi-work-directory }}
-      project-name: ${{ needs.ci.outputs.pulumi-project-name }}
-      stack-name: ${{ format('{0}-prod', needs.ci.outputs.stack-prefix) }}
-      worker-name: ${{ format('{0}-prod', needs.ci.outputs.worker-prefix) }}
-      cloud-url: ${{ needs.ci.outputs.pulumi-backend-url }}
+      operation: deploy
+      stack-name: app-production
+      stack-environment: production
+      region: ${{ needs.ci.outputs.cdk-region }}
       github-environment: production
     secrets:
-      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
-      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      CLOUDFLARE_WORKERS_DEV_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_DEV_SUBDOMAIN }}
+      AWS_ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}

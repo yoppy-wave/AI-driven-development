@@ -11,7 +11,6 @@ permissions:
 
 concurrency:
   group: preview-${{ github.event.pull_request.number }}
-  queue: max
   cancel-in-progress: false
 
 jobs:
@@ -19,21 +18,19 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       found: ${{ steps.target.outputs.found }}
-      work-directory: ${{ steps.target.outputs.work_directory }}
-      backend-url: ${{ steps.target.outputs.backend_url }}
       stack-name: ${{ steps.target.outputs.stack_name }}
-      worker-name: ${{ steps.target.outputs.worker_name }}
-      project-name: ${{ steps.target.outputs.project_name }}
+      region: ${{ steps.target.outputs.region }}
       source-ref: ${{ steps.target.outputs.source_ref }}
+      workflow-ref: ${{ steps.target.outputs.workflow_ref }}
+      account-id: ${{ steps.target.outputs.account_id }}
       comment-id: ${{ steps.target.outputs.comment_id }}
+      cleanup-allowed: ${{ steps.current-pr.outputs.allowed }}
     steps:
-      - name: Check out CI/CD cleanup helper
+      - name: Check out trusted cleanup helper
         uses: actions/checkout@v7
         with:
-          # Keep the helper aligned with the workflow revision; never check out PR head code here.
           ref: ${{ github.workflow_sha }}
           persist-credentials: false
-
       - name: Recover recorded preview cleanup target
         id: target
         env:
@@ -42,28 +39,94 @@ jobs:
           gh api --paginate --slurp "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
             | python .github/scripts/preview_cleanup.py github-output --pull-request '${{ github.event.pull_request.number }}' \
             >> "$GITHUB_OUTPUT"
-
+      - name: Confirm pull request remains closed
+        id: current-pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          state="$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}" --jq .state)"
+          if [[ "$state" == closed ]]; then
+            echo 'allowed=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'allowed=false' >> "$GITHUB_OUTPUT"
+          fi
   cleanup:
-    if: needs.cleanup-target.outputs.found == 'true'
+    if: needs.cleanup-target.outputs.found == 'true' && needs.cleanup-target.outputs.cleanup-allowed == 'true'
     needs: cleanup-target
-    uses: ./.github/workflows/reusable-cloudflare-worker.yml
-    with:
-      enabled: true
-      operation: destroy
-      work-directory: ${{ needs.cleanup-target.outputs.work-directory }}
-      stack-name: ${{ needs.cleanup-target.outputs.stack-name }}
-      worker-name: ${{ needs.cleanup-target.outputs.worker-name }}
-      project-name: ${{ needs.cleanup-target.outputs.project-name }}
-      source-ref: ${{ needs.cleanup-target.outputs.source-ref }}
-      cleanup-comment-id: ${{ needs.cleanup-target.outputs.comment-id }}
-      expected-pr-state: closed
-      cloud-url: ${{ needs.cleanup-target.outputs.backend-url }}
-      github-environment: preview
-      comment-on-pr: true
-      remove-stack: true
-    secrets:
-      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
-      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      CLOUDFLARE_WORKERS_DEV_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_DEV_SUBDOMAIN }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+      issues: write
+      pull-requests: write
+    environment:
+      name: preview
+    steps:
+      - name: Check out recorded trusted cleanup helper
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.cleanup-target.outputs.workflow-ref }}
+          persist-credentials: false
+      - name: Configure AWS credentials with OIDC
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ needs.cleanup-target.outputs.region }}
+      - name: Verify CloudFormation cleanup target
+        id: target
+        env:
+          EXPECTED_ACCOUNT_ID: ${{ needs.cleanup-target.outputs.account-id }}
+          STACK_NAME: ${{ needs.cleanup-target.outputs.stack-name }}
+          REGION: ${{ needs.cleanup-target.outputs.region }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          [[ "$STACK_NAME" == "app-pr-$PR_NUMBER" ]]
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          [[ -z "$EXPECTED_ACCOUNT_ID" || "$EXPECTED_ACCOUNT_ID" == "$account_id" ]]
+          if ! stack="$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" 2>/tmp/describe-error)"; then
+            if grep -q 'does not exist' /tmp/describe-error; then
+              echo 'exists=false' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            cat /tmp/describe-error >&2
+            exit 1
+          fi
+          status="$(jq -r '.Stacks[0].StackStatus' <<<"$stack")"
+          if [[ "$status" == DELETE_COMPLETE ]]; then
+            echo 'exists=false' >> "$GITHUB_OUTPUT"
+            echo 'completed=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$status" == DELETE_IN_PROGRESS ]]; then
+            echo 'exists=false' >> "$GITHUB_OUTPUT"
+            echo 'completed=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          jq -e --arg pr "$PR_NUMBER" '.Stacks[0].Tags | any(.Key == "app:managed-by" and .Value == "ai-driven-development") and any(.Key == "app:preview-pr" and .Value == $pr)' <<<"$stack" >/dev/null
+          echo 'exists=true' >> "$GITHUB_OUTPUT"
+          echo 'completed=false' >> "$GITHUB_OUTPUT"
+      - name: Mark cleanup target destroying
+        if: steps.target.outputs.exists == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          body="$(python .github/scripts/preview_cleanup.py update-body --pull-request '${{ github.event.pull_request.number }}' --stack-name '${{ needs.cleanup-target.outputs.stack-name }}' --region '${{ needs.cleanup-target.outputs.region }}' --source-ref '${{ needs.cleanup-target.outputs.source-ref }}' --workflow-ref '${{ needs.cleanup-target.outputs.workflow-ref }}' --account-id '${{ needs.cleanup-target.outputs.account-id }}' --status destroying)"
+          gh api --method PATCH "repos/${{ github.repository }}/issues/comments/${{ needs.cleanup-target.outputs.comment-id }}" -f body="$body"
+      - name: Confirm pull request remains closed before deletion
+        if: steps.target.outputs.exists == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: test "$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}" --jq .state)" = closed
+      - name: Delete preview CloudFormation stack
+        if: steps.target.outputs.exists == 'true'
+        run: |
+          aws cloudformation delete-stack --stack-name '${{ needs.cleanup-target.outputs.stack-name }}' --region '${{ needs.cleanup-target.outputs.region }}'
+          aws cloudformation wait stack-delete-complete --stack-name '${{ needs.cleanup-target.outputs.stack-name }}' --region '${{ needs.cleanup-target.outputs.region }}'
+      - name: Mark cleanup target destroyed
+        if: steps.target.outputs.exists == 'true' || steps.target.outputs.completed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          body="$(python .github/scripts/preview_cleanup.py update-body --pull-request '${{ github.event.pull_request.number }}' --stack-name '${{ needs.cleanup-target.outputs.stack-name }}' --region '${{ needs.cleanup-target.outputs.region }}' --source-ref '${{ needs.cleanup-target.outputs.source-ref }}' --workflow-ref '${{ needs.cleanup-target.outputs.workflow-ref }}' --account-id '${{ needs.cleanup-target.outputs.account-id }}' --status destroyed)"
+          gh api --method PATCH "repos/${{ github.repository }}/issues/comments/${{ needs.cleanup-target.outputs.comment-id }}" -f body="$body"

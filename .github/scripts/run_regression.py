@@ -11,7 +11,7 @@ from pathlib import Path
 
 IGNORED_DIRS = {
     ".git", ".github", ".devcontainer", ".venv", "venv", "node_modules",
-    "dist", "build", "bin", "obj", "coverage", ".next", "__pycache__",
+    "dist", "build", "obj", "coverage", ".next", "cdk.out", "__pycache__",
 }
 
 
@@ -101,7 +101,7 @@ def node_project(root: Path, project: Path) -> None:
     else:
         manager = ["corepack", "pnpm" if locks[0] == "pnpm-lock.yaml" else "yarn"]
         run([*manager, "install", "--frozen-lockfile" if manager[-1] == "pnpm" else "--immutable"], directory)
-    for name in ("test", "lint", "typecheck", "build"):
+    for name in ("test", "lint", "typecheck", "build", "synth", "actionlint"):
         if name in package.get("scripts", {}):
             run([*manager, "run", name], directory)
 
