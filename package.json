@@ -3,7 +3,6 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "actionlint": "node scripts/actionlint.cjs",
     "build": "tsc --noEmit",
     "cdk": "cdk",
     "synth": "cdk synth",
@@ -17,7 +16,6 @@
   "devDependencies": {
     "@types/jest": "30.0.0",
     "@types/node": "24.10.0",
-    "actionlint": "2.0.6",
     "aws-cdk": "2.1145.0",
     "jest": "30.5.2",
     "ts-jest": "29.4.15",
