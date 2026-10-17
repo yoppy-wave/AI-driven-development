@@ -1,7 +1,7 @@
 name: Clean up preview environment
 
 on:
-  pull_request:
+  pull_request_target:
     types: [closed]
 
 permissions:
@@ -12,6 +12,7 @@ permissions:
 concurrency:
   group: preview-${{ github.event.pull_request.number }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   cleanup-target:
@@ -26,10 +27,11 @@ jobs:
       comment-id: ${{ steps.target.outputs.comment_id }}
       cleanup-allowed: ${{ steps.current-pr.outputs.allowed }}
     steps:
-      - name: Check out trusted cleanup helper
+      - name: Check out protected default-branch cleanup helper
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.workflow_sha }}
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
           persist-credentials: false
       - name: Recover recorded preview cleanup target
         id: target
@@ -39,6 +41,14 @@ jobs:
           gh api --paginate --slurp "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
             | python .github/scripts/preview_cleanup.py github-output --pull-request '${{ github.event.pull_request.number }}' \
             >> "$GITHUB_OUTPUT"
+      - name: Verify recorded cleanup helper is trusted
+        if: steps.target.outputs.found == 'true'
+        env:
+          WORKFLOW_REF: ${{ steps.target.outputs.workflow_ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git fetch --no-tags origin "$DEFAULT_BRANCH"
+          git merge-base --is-ancestor "$WORKFLOW_REF" "origin/$DEFAULT_BRANCH"
       - name: Confirm pull request remains closed
         id: current-pr
         env:
@@ -63,10 +73,11 @@ jobs:
     environment:
       name: preview
     steps:
-      - name: Check out recorded trusted cleanup helper
+      - name: Check out protected default-branch cleanup helper
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.cleanup-target.outputs.workflow-ref }}
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
           persist-credentials: false
       - name: Configure AWS credentials with OIDC
         uses: aws-actions/configure-aws-credentials@v5
@@ -100,11 +111,13 @@ jobs:
           fi
           if [[ "$status" == DELETE_IN_PROGRESS ]]; then
             echo 'exists=false' >> "$GITHUB_OUTPUT"
+            echo 'deleting=true' >> "$GITHUB_OUTPUT"
             echo 'completed=false' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           jq -e --arg pr "$PR_NUMBER" '.Stacks[0].Tags | any(.Key == "app:managed-by" and .Value == "ai-driven-development") and any(.Key == "app:preview-pr" and .Value == $pr)' <<<"$stack" >/dev/null
           echo 'exists=true' >> "$GITHUB_OUTPUT"
+          echo 'deleting=false' >> "$GITHUB_OUTPUT"
           echo 'completed=false' >> "$GITHUB_OUTPUT"
       - name: Mark cleanup target destroying
         if: steps.target.outputs.exists == 'true'
@@ -123,8 +136,11 @@ jobs:
         run: |
           aws cloudformation delete-stack --stack-name '${{ needs.cleanup-target.outputs.stack-name }}' --region '${{ needs.cleanup-target.outputs.region }}'
           aws cloudformation wait stack-delete-complete --stack-name '${{ needs.cleanup-target.outputs.stack-name }}' --region '${{ needs.cleanup-target.outputs.region }}'
+      - name: Wait for in-progress preview stack deletion
+        if: steps.target.outputs.deleting == 'true'
+        run: aws cloudformation wait stack-delete-complete --stack-name '${{ needs.cleanup-target.outputs.stack-name }}' --region '${{ needs.cleanup-target.outputs.region }}'
       - name: Mark cleanup target destroyed
-        if: steps.target.outputs.exists == 'true' || steps.target.outputs.completed == 'true'
+        if: steps.target.outputs.exists == 'true' || steps.target.outputs.deleting == 'true' || steps.target.outputs.completed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

@@ -21,7 +21,7 @@ class CicdWorkflowTests(unittest.TestCase):
         for content in (workflow("cicd.yml"), workflow("cicd-preview-cleanup.yml")):
             self.assertIn("group: preview-${{ github.event.pull_request.number", content)
             self.assertIn("cancel-in-progress: false", content)
-            self.assertNotIn("queue: max", content)
+            self.assertIn("queue: max", content)
 
     def test_preview_requires_trusted_pr_and_environment_gate(self) -> None:
         content = workflow("cicd.yml")
@@ -31,13 +31,13 @@ class CicdWorkflowTests(unittest.TestCase):
         self.assertNotIn("secrets: inherit", content)
 
     def test_aws_oidc_is_limited_to_aws_operation_jobs(self) -> None:
-        self.assertIn("id-token: write", workflow("reusable-aws-cdk.yml"))
+        self.assertIn("aws-actions/configure-aws-credentials@v5", workflow("reusable-aws-cdk.yml"))
+        self.assertEqual(workflow("cicd.yml").count("id-token: write"), 5)
         self.assertIn("permissions:\n      contents: read\n      id-token: write", workflow("cicd-preview-cleanup.yml"))
 
     def test_preview_comment_permissions_are_not_required_for_standard_deployments(self) -> None:
         adapter = workflow("reusable-aws-cdk.yml")
-        self.assertNotIn("issues: write", adapter)
-        self.assertNotIn("pull-requests: write", adapter)
+        self.assertNotIn("permissions:", adapter)
         cicd = workflow("cicd.yml")
         self.assertEqual(cicd.count("issues: write"), 3)
         self.assertEqual(cicd.count("pull-requests: write"), 3)
@@ -49,17 +49,24 @@ class CicdWorkflowTests(unittest.TestCase):
 
     def test_cleanup_never_checks_out_or_executes_pr_source(self) -> None:
         cleanup = workflow("cicd-preview-cleanup.yml")
-        self.assertIn("ref: ${{ github.workflow_sha }}", cleanup)
-        self.assertIn("ref: ${{ needs.cleanup-target.outputs.workflow-ref }}", cleanup)
+        self.assertIn("pull_request_target:", cleanup)
+        self.assertEqual(cleanup.count("ref: ${{ github.event.repository.default_branch }}"), 2)
+        self.assertIn("git merge-base --is-ancestor", cleanup)
         self.assertNotIn("npm ci", cleanup)
         self.assertNotIn("npm run cdk", cleanup)
 
     def test_cleanup_validates_cloudformation_identity_and_tags_before_delete(self) -> None:
         cleanup = workflow("cicd-preview-cleanup.yml")
-        for required in ("aws sts get-caller-identity", "aws cloudformation describe-stacks", "app:managed-by", "app:preview-pr", "DELETE_IN_PROGRESS", "aws cloudformation delete-stack"):
+        for required in ("aws sts get-caller-identity", "aws cloudformation describe-stacks", "app:managed-by", "app:preview-pr", "DELETE_IN_PROGRESS", "Wait for in-progress preview stack deletion", "aws cloudformation delete-stack"):
             self.assertIn(required, cleanup)
 
     def test_cleanup_handles_reopened_pr_and_missing_stack_idempotently(self) -> None:
         cleanup = workflow("cicd-preview-cleanup.yml")
         for required in ("Confirm pull request remains closed", "does not exist", "exists=false", "status destroying", "status destroyed"):
             self.assertIn(required, cleanup)
+
+    def test_cleanup_waits_for_delete_in_progress_before_recording_destroyed(self) -> None:
+        cleanup = workflow("cicd-preview-cleanup.yml")
+        self.assertIn("echo 'deleting=true'", cleanup)
+        self.assertIn("Wait for in-progress preview stack deletion", cleanup)
+        self.assertIn("steps.target.outputs.deleting == 'true'", cleanup)

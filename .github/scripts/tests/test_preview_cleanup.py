@@ -28,6 +28,26 @@ class PreviewCleanupTests(unittest.TestCase):
     def test_destroyed_record_is_not_selected(self) -> None:
         self.assertIsNone(preview_cleanup.latest_target([self.comment(self.values(status="destroyed"))], 42))
 
+    def test_latest_destroyed_record_prevents_reusing_a_previous_active_target(self) -> None:
+        active = self.values(status="active")
+        destroyed = self.values(source_ref=SHA_B, status="destroyed")
+        self.assertIsNone(preview_cleanup.latest_target([self.comment(active), self.comment(destroyed, 2)], 42))
+
+    def test_latest_record_supports_cleanup_retry_after_a_failed_destroy(self) -> None:
+        destroying = self.values(status="destroying")
+        self.assertEqual(
+            preview_cleanup.latest_target([self.comment(destroying, 3)], 42),
+            {**destroying, "comment_id": "3"},
+        )
+
+    def test_latest_pending_record_is_selected_after_a_redeployment(self) -> None:
+        active = self.values(status="active")
+        pending = self.values(source_ref=SHA_B, status="pending")
+        self.assertEqual(
+            preview_cleanup.latest_target([self.comment(active), self.comment(pending, 4)], 42),
+            {**pending, "comment_id": "4"},
+        )
+
     def test_rejects_untrusted_wrong_stack_or_invalid_account_metadata(self) -> None:
         self.assertIsNone(preview_cleanup.latest_target([self.comment(self.values(), login="contributor")], 42))
         with self.assertRaisesRegex(ValueError, "exactly match"):

@@ -81,7 +81,9 @@ def latest_target(comments: list[dict[str, Any]], pull_request: int) -> dict[str
     for comment in reversed(comments):
         values = metadata_from_comment(comment.get("body"), comment.get("user", {}).get("login"), pull_request)
         comment_id = comment.get("id")
-        if values is not None and values["status"] != "destroyed" and isinstance(comment_id, int):
+        if values is not None and isinstance(comment_id, int):
+            if values["status"] == "destroyed":
+                return None
             return {**values, "comment_id": str(comment_id)}
     return None
 

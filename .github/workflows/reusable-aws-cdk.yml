@@ -42,22 +42,21 @@ on:
         required: false
         type: boolean
         default: false
+      trusted-workflow-ref:
+        description: "Immutable base-branch revision of the trusted cleanup management code."
+        required: false
+        type: string
+        default: ""
     secrets:
       AWS_ROLE_TO_ASSUME:
         description: "OIDC role ARN. A same-named Environment Secret takes precedence."
         required: false
-
-permissions:
-  contents: read
 
 jobs:
   cdk:
     if: inputs.enabled
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    permissions:
-      contents: read
-      id-token: write
     environment:
       name: ${{ inputs.github-environment }}
     steps:
@@ -92,7 +91,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          body="$(python .github/scripts/preview_cleanup.py record-body --pull-request '${{ github.event.pull_request.number }}' --stack-name '${{ inputs.stack-name }}' --region '${{ inputs.region }}' --source-ref '${{ inputs.source-ref }}' --workflow-ref '${{ github.workflow_sha }}' --status pending)"
+          body="$(python .github/scripts/preview_cleanup.py record-body --pull-request '${{ github.event.pull_request.number }}' --stack-name '${{ inputs.stack-name }}' --region '${{ inputs.region }}' --source-ref '${{ inputs.source-ref }}' --workflow-ref '${{ inputs.trusted-workflow-ref }}' --status pending)"
           comment_id="$(gh api --method POST "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" -f body="$body" --jq .id)"
           echo "comment-id=$comment_id" >> "$GITHUB_OUTPUT"
       - name: Confirm pull request is current before AWS operation
@@ -126,7 +125,7 @@ jobs:
           COMMENT_ID: ${{ steps.cleanup.outputs.comment-id }}
         run: |
           account_id="$(aws sts get-caller-identity --query Account --output text)"
-          body="$(python .github/scripts/preview_cleanup.py update-body --pull-request '${{ github.event.pull_request.number }}' --stack-name '${{ inputs.stack-name }}' --region '${{ inputs.region }}' --source-ref '${{ inputs.source-ref }}' --workflow-ref '${{ github.workflow_sha }}' --account-id "$account_id" --status active)"
+          body="$(python .github/scripts/preview_cleanup.py update-body --pull-request '${{ github.event.pull_request.number }}' --stack-name '${{ inputs.stack-name }}' --region '${{ inputs.region }}' --source-ref '${{ inputs.source-ref }}' --workflow-ref '${{ inputs.trusted-workflow-ref }}' --account-id "$account_id" --status active)"
           gh api --method PATCH "repos/${{ github.repository }}/issues/comments/$COMMENT_ID" -f body="$body"
   skipped:
     if: ${{ !inputs.enabled }}
