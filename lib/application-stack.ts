@@ -38,7 +38,7 @@ export class ApplicationStack extends cdk.Stack {
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: "handler.handler",
       code: lambda.Code.fromAsset("lambda", {
-        exclude: ["__pycache__", ".pytest_cache", "test_*.py", "*.pyc"],
+        exclude: ["__pycache__", ".pytest_cache", "**/*_test.py", "*.pyc"],
       }),
       environment: {
         ITEMS_TABLE_NAME: table.tableName,
