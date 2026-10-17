@@ -25,7 +25,7 @@ AWSリソースはTypeScriptのCDK Stackで定義し、LambdaのPython実装は`
 
 `.github/workflows/reusable-ci.yml`はクラウド非依存のCI、`.github/workflows/reusable-aws-cdk.yml`はAWS CDK用アダプターです。どちらもGitHub Actionsの`workflow_call`で呼び出す再利用ワークフローであり、仕様に従って`.github/workflows/`直下に置いています。`.github/workflows/cicd.yml`はPR・信頼済みブランチへのpush・手動実行の入口、`.github/workflows/cicd-preview-cleanup.yml`はPR close時の一時環境削除の入口です。
 
-アプリ固有の有効化状態は[`.github/cicd/application.json`](.github/cicd/application.json)で管理します。初期状態ではAWS CDK、PRごとの一時環境、development / staging / productionデプロイをすべて無効にしているため、AWS認証情報が未設定でもクラウド操作は行いません。CIは設定検証と、検出したPython・Node.jsプロジェクトの`test`、任意の`lint`、`typecheck`、`build`、`synth`、`actionlint`を実行します。
+アプリ固有の有効化状態は[`.github/cicd/application.json`](.github/cicd/application.json)で管理します。初期状態ではAWS CDK、PRごとの一時環境、development / staging / productionデプロイをすべて無効にしているため、AWS認証情報が未設定でもクラウド操作は行いません。CIは設定検証と、検出したPython・Node.jsプロジェクトの`test`、任意の`lint`、`typecheck`、`build`、`synth`を実行します。GitHub Actionsのworkflowを編集する際は、Dev ContainerとVS Codeの推奨拡張に含めた公式のGitHub Actions拡張機能で構文・設定のフィードバックを確認します。この構成ではCI上の独立したGitHub Actions構文検証は行いません。
 
 実際に有効化する前に、次を設定してください。
 
