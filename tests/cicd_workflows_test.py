@@ -55,6 +55,14 @@ class CicdWorkflowTests(unittest.TestCase):
         self.assertNotIn("npm ci", cleanup)
         self.assertNotIn("npm run cdk", cleanup)
 
+    def test_pull_request_policy_checks_out_and_executes_the_trusted_base_commit(self) -> None:
+        policy = workflow("pull-request-policy.yml")
+        checkout = "uses: actions/checkout@v7\n        with:\n          ref: ${{ github.event.pull_request.base.sha }}\n          persist-credentials: false"
+        self.assertIn("pull_request_target:", policy)
+        self.assertIn(checkout, policy)
+        self.assertLess(policy.index(checkout), policy.index("run: python .github/scripts/pr_policy.py"))
+        self.assertNotIn("github.event.pull_request.head.sha", policy)
+
     def test_cleanup_validates_cloudformation_identity_and_tags_before_delete(self) -> None:
         cleanup = workflow("cicd-preview-cleanup.yml")
         for required in ("aws sts get-caller-identity", "aws cloudformation describe-stacks", "app:managed-by", "app:preview-pr", "DELETE_IN_PROGRESS", "Wait for in-progress preview stack deletion", "aws cloudformation delete-stack"):
