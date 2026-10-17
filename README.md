@@ -1,6 +1,6 @@
 # AI-driven development
 
-WSL2のUbuntuにDocker Engineを直接インストールし、VS Code Dev Containersで使う開発環境です。Docker Desktopは不要です。Python 3.12、Node.js 24、Git、GitHub CLIを用意し、コンテナに接続した際にClineなどの拡張機能を自動インストールします。
+WSL2上のコンテナ実行環境でVS Code Dev Containersを使う開発環境です。WSL2・Docker Engineの導入は各開発者が事前に手動で行います。Docker Desktopは必須ではありません。Dev ContainerはPython 3.12、Node.js 24、Git、GitHub CLIを用意し、コンテナに接続した際にClineなどの拡張機能を自動インストールします。
 
 Dockerfileは言語・OSツール、`devcontainer.json`はNode.jsの追加、拡張機能、エディター設定を担当します。初回はフォルダーを開いて **Reopen in Container（コンテナーで再度開く）** を選択してください。通常のフォルダーを開くだけではコンテナの作成や拡張機能の導入は始まりません。
 
@@ -37,91 +37,13 @@ PR一時環境は`app-pr-<PR番号>`だけを使用します。`preview`の`diff
 
 ## 初回の準備
 
-### 1. WSL2・UbuntuとVS Code
+### WSL2・Docker EngineとVS Code
 
-WSL2・Ubuntuがまだない場合は、管理者のPowerShellで次を実行し、要求された場合はWindowsを再起動します。初回のUbuntu起動時にLinuxのユーザー名とパスワードを設定します。
+Dev Containerを開く前に、WSL2、Linuxディストリビューション、Docker Engine、VS Code、VS CodeのWSLおよびDev Containers拡張機能を各自でセットアップしてください。このリポジトリではOSやDocker Engineの導入を自動化しません。Docker Desktopは必須ではありません。
 
-```powershell
-wsl --install -d Ubuntu
-```
+セットアップの詳細は、[MicrosoftのWSLインストールガイド](https://learn.microsoft.com/windows/wsl/install)、[Docker EngineのUbuntu向け公式手順](https://docs.docker.com/engine/install/ubuntu/)、[VS CodeのDev Containers利用ガイド](https://code.visualstudio.com/docs/devcontainers/containers)を参照してください。Dockerを非rootユーザーで利用する場合は、[Dockerのインストール後の手順](https://docs.docker.com/engine/install/linux-postinstall/)に従ってください。
 
-インストール済みの場合はここから進めます。PowerShellの `wsl --list --verbose` でUbuntuのVERSIONが `2` であることを確認します。`1` の場合は `wsl --set-version Ubuntu 2` で変換します。
-
-WindowsにVS Codeをインストールし、PowerShellで次を実行します。`.vscode/extensions.json` にも同じ拡張機能を推奨として登録しています。
-
-```powershell
-wsl --set-default Ubuntu
-code --install-extension ms-vscode-remote.remote-wsl
-code --install-extension ms-vscode-remote.remote-containers
-```
-
-VS Codeで `Ctrl+Shift+P` → **Preferences: Open User Settings (JSON)** を開き、既存の設定オブジェクトに次の2項目を追加します。Windows側のフォルダーから操作した場合も、Dev ContainersがUbuntu内のDockerを使うようにする設定です。インストール済みのDocker DesktopがVS Codeから起動されることを避けます。
-
-```json
-{
-  "dev.containers.executeInWSL": true,
-  "dev.containers.executeInWSLDistro": "Ubuntu"
-}
-```
-
-これはWindows側VS Codeのユーザー設定であり、`.vscode/settings.json` や `devcontainer.json` には入れません。ディストリビューション名を変えている場合は `wsl --list --quiet` の名前に合わせます。
-
-PowerShellで `wsl -d Ubuntu` を実行します。ここからのBashコマンドは、WSLのUbuntuで実行します。
-
-### 2. Ubuntuのsystemdを確認
-
-```bash
-ps -p 1 -o comm=
-```
-
-`systemd` と表示されれば次へ進めます。違う場合は、`sudo nano /etc/wsl.conf` で既存設定を残したまま次を設定します。既存の `[boot]` があれば、そのセクションの `systemd` を変更します。
-
-```ini
-[boot]
-systemd=true
-```
-
-Ubuntuの作業を保存して終了し、PowerShellで `wsl --terminate Ubuntu` を実行してから `wsl -d Ubuntu` で開き直します。[Microsoftのsystemd手順](https://learn.microsoft.com/windows/wsl/systemd)も参照できます。
-
-### 3. Ubuntu内にDocker Engineをインストール
-
-Ubuntuでこのプロジェクトのフォルダーへ移動し、次を実行します。Windowsの `C:\Users\<Windowsユーザー名>\Documents\ChatGPT\AI-driven-development` は、Ubuntuでは `/mnt/c/Users/<Windowsユーザー名>/Documents/ChatGPT/AI-driven-development` です。
-
-```bash
-sudo bash scripts/setup-docker-engine-wsl.sh "$USER"
-```
-
-スクリプトは[Docker公式のUbuntu向け手順](https://docs.docker.com/engine/install/ubuntu/)に沿ってAPTリポジトリを登録し、Docker Engine・CLI・Buildx・Composeをインストールします。Ubuntu 22.04 / 24.04 / 26.04を対象とし、systemdによるUbuntu起動時のDocker起動と、指定ユーザーの `docker` グループへの追加を設定します。再実行すると、APTで取得可能な最新版へ更新されることがあります。
-
-`docker` グループはUbuntu内でroot相当の権限を持ちます。会社ではこの利用方式も社内方針に合わせてください。[Dockerのインストール後の手順](https://docs.docker.com/engine/install/linux-postinstall/)に説明があります。
-
-インストール後、グループへの追加をVS Codeにも反映するため、Ubuntu内の作業を保存し、WSL接続中のVS Codeを閉じます。PowerShellでUbuntuを再起動します。
-
-```powershell
-wsl --terminate Ubuntu
-wsl -d Ubuntu
-```
-
-開き直したUbuntuで確認します。
-
-```bash
-docker version
-docker compose version
-docker buildx version
-docker run --rm hello-world
-```
-
-`docker version` にClientとServerの両方が表示され、`hello-world` が成功すれば準備完了です。Dockerを手動で起動する場合は `sudo systemctl start docker` を使います。
-
-### Docker Desktopを以前使っていた場合
-
-先にDocker Desktopの **Settings → Resources → WSL Integration** で、既定ディストリビューションへの連携とUbuntuへの連携を無効にして適用し、Docker Desktopを終了してください。自動起動も無効にします。Desktop用コンテナ・イメージ・ボリュームはUbuntu内のDocker Engineとは別の保存先であり、自動移行されません。
-
-連携が残った状態では、Ubuntuの `docker` がDesktop用コマンドへのリンクになっていることがあります。導入スクリプトはこれを検出すると停止します。`ls -l /usr/bin/docker` と `docker info` で接続先を確認してください。
-
-連携を無効化して終了した後もリンクが残る場合は、エラーに表示されたファイルを `ls -l` で確認し、リンク先が `/mnt/wsl/docker-desktop/` 配下のものだけを別名に退避して再実行します。CLIのほか、Buildx・Composeのリンクが残ることもあります。Dockerのデータディレクトリを削除する必要はありません。
-
-移行後に `docker-credential-desktop.exe` のエラーが出る場合は、Ubuntuの `~/.docker/config.json` をバックアップし、`"credsStore": "desktop.exe"` の設定を見直します。認証情報や他の設定は保持し、必要なレジストリにはUbuntu側で再ログインしてください。
+`.vscode/extensions.json` には、VS CodeのWSLおよびDev Containers拡張機能を推奨として登録しています。
 
 ## 開発環境を開く
 
@@ -130,7 +52,7 @@ docker run --rm hello-world
 3. 初回のイメージ取得・ビルド・拡張機能のインストール完了を待ちます。初回はインターネット接続が必要です。
 4. 左下にDev Containerへの接続が表示されたら、新しいターミナルを開きます。
 
-この構成では、WSL接続のウィンドウからDev Containerを開くことでUbuntu内のDocker Engineを使用します。接続の通知が出なくても、上記コマンドから開始できます。WindowsのPowerShellでの `docker` の成否は、この構成の動作確認には使いません。
+この構成では、WSL接続のウィンドウからDev Containerを開きます。接続の通知が出なくても、上記コマンドから開始できます。
 
 ファイル操作の性能のため、今後プロジェクトを配置する際は、Windows側の `/mnt/c/...` よりWSL側の `~/projects/...` を推奨します。フォルダーを `~/projects/AI-driven-development` に配置した場合の例:
 
@@ -212,7 +134,7 @@ Dockerfileだけを `docker build` した場合、Node.js Feature・拡張機能
 
 ## GitHub Codespacesで使う場合
 
-このフォルダーをGitHubリポジトリにコミットし、Codespaceを作成すると、`.devcontainer/devcontainer.json` を使って環境を構築できます。Codespaces側にはコンテナを動かす仕組みがあるため、WSLや上記のDocker Engine導入スクリプトの実行は不要です。Clineの認証は利用する環境で設定してください。[GitHubのDev Container設定ガイド](https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/adding-a-dev-container-configuration/introduction-to-dev-containers)も参照できます。
+このフォルダーをGitHubリポジトリにコミットし、Codespaceを作成すると、`.devcontainer/devcontainer.json` を使って環境を構築できます。Codespaces側にはコンテナを動かす仕組みがあるため、ローカルのWSL2・Docker Engineのセットアップは不要です。Clineの認証は利用する環境で設定してください。[GitHubのDev Container設定ガイド](https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/adding-a-dev-container-configuration/introduction-to-dev-containers)も参照できます。
 
 ## GitHubリポジトリの初回設定
 
@@ -259,6 +181,5 @@ Dockerfileだけを `docker build` した場合、Node.js Feature・拡張機能
 ## 公式資料
 
 - [VS Code: Dev Containers](https://code.visualstudio.com/docs/devcontainers/containers)
-- [VS Code: WSL内のDocker Engineを使用する構成](https://code.visualstudio.com/remote/advancedcontainers/docker-options)
 - [Dev ContainersのPythonイメージ](https://github.com/devcontainers/images/tree/main/src/python)
 - [Node.js Feature](https://github.com/devcontainers/features/tree/main/src/node)
