@@ -1,5 +1,5 @@
 ---
-applyTo: ".github/cicd/**,.github/workflows/cicd*.yml,.github/workflows/reusable-*.yml,.github/scripts/cicd_config.py,tests/cicd_*_test.py"
+applyTo: ".github/cicd/**,.github/workflows/cicd*.yml,.github/workflows/reusable-*.yml,.github/scripts/cicd_config.py,.github/scripts/cicd_config_test.py,.github/scripts/preview_cleanup.py,.github/scripts/preview_cleanup_test.py,tests/cicd_workflows_test.py"
 ---
 
 # CI/CD共通基盤の開発指示

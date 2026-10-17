@@ -11,4 +11,4 @@
 
 ## テスト配置
 
-- 実装ファイルに対応するPython単体テストは、同じディレクトリに `<実装ファイル名>_test.py` として置く（例：`pricing.py` → `pricing_test.py`）。複数ファイルを横断するテストは `tests/` に置く。
+- 単一の実装・設定ファイルを主に検証するPython単体テストは、同じディレクトリに `<実装ファイル名>_test.py` として置く（例：`pricing.py` → `pricing_test.py`）。複数ファイルやworkflow全体を横断するテストは `tests/` に置く。

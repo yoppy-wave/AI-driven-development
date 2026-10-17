@@ -1,11 +1,8 @@
 """Tests for immutable, stateful AWS PR preview cleanup records."""
 
-import sys
 import unittest
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / ".github" / "scripts"))
-import preview_cleanup  # noqa: E402
+import preview_cleanup
 
 SHA_A = "a" * 40
 SHA_B = "b" * 40
