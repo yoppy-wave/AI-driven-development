@@ -16,6 +16,7 @@ export function stackNameForEnvironment(environment: string): string {
 
 export interface ApplicationStackProps extends cdk.StackProps {
   readonly environment: string;
+  readonly lambdaAssetPath?: string;
 }
 
 export class ApplicationStack extends cdk.Stack {
@@ -37,7 +38,7 @@ export class ApplicationStack extends cdk.Stack {
     const handler = new lambda.Function(this, "ApiHandler", {
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: "handler.handler",
-      code: lambda.Code.fromAsset("lambda", {
+      code: lambda.Code.fromAsset(props.lambdaAssetPath ?? "lambda", {
         exclude: ["__pycache__", ".pytest_cache", "**/*_test.py", "*.pyc"],
       }),
       environment: {
