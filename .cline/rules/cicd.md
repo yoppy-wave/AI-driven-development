@@ -4,7 +4,10 @@ paths:
   - ".github/workflows/cicd*.yml"
   - ".github/workflows/reusable-*.yml"
   - ".github/scripts/cicd_config.py"
-  - "tests/cicd_*_test.py"
+  - ".github/scripts/cicd_config_test.py"
+  - ".github/scripts/preview_cleanup.py"
+  - ".github/scripts/preview_cleanup_test.py"
+  - "tests/cicd_workflows_test.py"
   - ".github/workflows/reusable-aws-cdk.yml"
 ---
 

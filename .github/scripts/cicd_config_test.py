@@ -1,13 +1,11 @@
 """Tests for the AWS CDK CI/CD configuration contract."""
 
 import json
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / ".github" / "scripts"))
-import cicd_config  # noqa: E402
+import cicd_config
 
 
 class CicdConfigTests(unittest.TestCase):

@@ -242,7 +242,7 @@ Dockerfileだけを `docker build` した場合、Node.js Feature・拡張機能
 
 [`.github/workflows/regression.yml`](.github/workflows/regression.yml) は、すべてのブランチへのpush時に、pushされたコミットをテストします。同じブランチへ連続してpushされた場合は、実行中の古いテストをキャンセルして最新のpushを優先します。APIキーなどのSecretsは渡さず、リポジトリは読み取り権限でチェックアウトします。
 
-現在は `.github/scripts/` に実装ファイルと並べて置いた既存テストと、複数ファイルを横断する `tests/` 配下のテストを毎回実行します。Pythonの実装対応テストは実装ファイルと同じディレクトリに `<実装ファイル名>_test.py` として置き、CI/CD workflowなどを横断するテストは `tests/` に置きます。今後アプリを追加した場合は、[回帰テスト実行スクリプト](.github/scripts/run_regression.py) がPythonの `pyproject.toml` / `requirements.txt` と、TypeScriptの `package.json` を探し、各プロジェクトのテストを実行します。Pythonは依存関係を導入してから `pytest`、Node.jsは `test` スクリプト（設定があれば `lint` と `typecheck` も）を使います。Pythonの `*_test.py` またはNode.jsの `test` スクリプトがない場合は失敗させ、テストなしの新機能を見落とさないようにします。Node.jsでは再現可能な依存関係のため、npm・pnpm・Yarnのロックファイルを1つ置いてください。
+現在は `.github/scripts/` に実装ファイルと並べて置いた既存テストと、複数ファイルを横断する `tests/` 配下のテストを毎回実行します。Pythonの単一実装・設定ファイル向けテストは実装ファイルと同じディレクトリに `<実装ファイル名>_test.py` として置き、CI/CD workflowなどを横断するテストは `tests/` に置きます。今後アプリを追加した場合は、[回帰テスト実行スクリプト](.github/scripts/run_regression.py) がPythonの `pyproject.toml` / `requirements.txt` と、TypeScriptの `package.json` を探し、各プロジェクトのテストを実行します。Pythonは依存関係を導入してから `pytest`、Node.jsは `test` スクリプト（設定があれば `lint` と `typecheck` も）を使います。Pythonの `*_test.py` またはNode.jsの `test` スクリプトがない場合は失敗させ、テストなしの新機能を見落とさないようにします。Node.jsでは再現可能な依存関係のため、npm・pnpm・Yarnのロックファイルを1つ置いてください。
 
 テストでは、既存の条件・計算・戻り値の破壊、重要な処理の呼び出し削除、複数の入口での判断不一致、APIや型の変更に伴う更新漏れを検知するケースを追加してください。詳しい観点は [共通指示](.github/copilot-instructions.md) と [言語別指示](.github/instructions/) にあります。ワークフローはテストを実行しますが、テストが期待される振る舞いを十分に表しているかはレビューが必要です。DBなどを使う結合テストを追加した際は、必要なサービスと初期データもワークフローに設定してください。
 
