@@ -6,13 +6,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / ".github" / "scripts"))
 import cicd_config  # noqa: E402
 
 
 class CicdConfigTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp = tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[3])
+        self.temp = tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1])
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.config_path = self.root / ".github" / "cicd" / "application.json"
