@@ -109,7 +109,7 @@ def node_project(root: Path, project: Path) -> None:
 def main() -> None:
     root = Path(__file__).resolve().parents[2]
     python_roots, node_roots = discover(root)
-    helper_tests = root / ".github" / "scripts" / "tests"
+    helper_tests = root / ".github" / "scripts"
     run([sys.executable, "-m", "unittest", "discover", "-s", str(helper_tests), "-p", "test_*.py"], root)
 
     if python_roots:

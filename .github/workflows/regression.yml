@@ -2,6 +2,8 @@ name: Regression tests
 
 on:
   push:
+  pull_request:
+    branches: [stg, prod]
 
 permissions:
   contents: read
