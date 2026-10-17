@@ -19,5 +19,11 @@ jobs:
       HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
       ALLOWED_STG_HEAD_PATTERNS: feature/*,fix/*
     steps:
+      - name: Check out trusted base commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
       - name: Validate pull request branch policy
         run: python .github/scripts/pr_policy.py
