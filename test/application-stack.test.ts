@@ -1,17 +1,15 @@
 import * as cdk from "aws-cdk-lib";
 import { Match, Template } from "aws-cdk-lib/assertions";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ApplicationStack, stackNameForEnvironment } from "../lib/application-stack";
 
-const lambdaDirectory = join(process.cwd(), "lambda");
-
-function lambdaAsset(): { hash: string; files: string[] } {
+function lambdaAsset(lambdaAssetPath: string): { hash: string; files: string[] } {
   const outdir = mkdtempSync(join(tmpdir(), "ai-driven-development-cdk-"));
   try {
     const app = new cdk.App({ outdir });
-    new ApplicationStack(app, "AssetTest", { environment: "development" });
+    new ApplicationStack(app, "AssetTest", { environment: "development", lambdaAssetPath });
     app.synth();
 
     const assetDirectory = readdirSync(outdir, { withFileTypes: true }).find(
@@ -63,29 +61,29 @@ describe("ApplicationStack", () => {
   });
 
   test("excludes Python tests from the Lambda asset without masking implementation changes", () => {
-    const handlerPath = join(lambdaDirectory, "handler.py");
-    const testPath = join(lambdaDirectory, "handler_test.py");
-    const nestedDirectory = join(lambdaDirectory, "nested");
+    const fixtureDirectory = mkdtempSync(join(tmpdir(), "ai-driven-development-lambda-"));
+    const handlerPath = join(fixtureDirectory, "handler.py");
+    const testPath = join(fixtureDirectory, "handler_test.py");
+    const nestedDirectory = join(fixtureDirectory, "nested");
     const nestedTestPath = join(nestedDirectory, "handler_test.py");
-    const originalHandler = readFileSync(handlerPath, "utf8");
-    const originalTest = readFileSync(testPath, "utf8");
-
-    mkdirSync(nestedDirectory, { recursive: true });
-    writeFileSync(nestedTestPath, "def test_nested_handler() -> None:\n    pass\n");
 
     try {
-      const initialAsset = lambdaAsset();
+      writeFileSync(handlerPath, "def handler(event, context):\n    return {'statusCode': 200}\n");
+      writeFileSync(testPath, "def test_handler() -> None:\n    pass\n");
+      mkdirSync(nestedDirectory, { recursive: true });
+      writeFileSync(nestedTestPath, "def test_nested_handler() -> None:\n    pass\n");
+
+      const initialAsset = lambdaAsset(fixtureDirectory);
       expect(initialAsset.files).toEqual(["handler.py"]);
 
-      writeFileSync(testPath, `${originalTest}\n# Asset exclusion regression test.\n`);
-      expect(lambdaAsset().hash).toBe(initialAsset.hash);
+      writeFileSync(testPath, "def test_handler() -> None:\n    assert True\n");
+      expect(lambdaAsset(fixtureDirectory).hash).toBe(initialAsset.hash);
 
-      writeFileSync(handlerPath, `${originalHandler}\n# Asset hash regression test.\n`);
-      expect(lambdaAsset().hash).not.toBe(initialAsset.hash);
+      writeFileSync(handlerPath, "def handler(event, context):\n    return {'statusCode': 201}\n");
+      expect(lambdaAsset(fixtureDirectory).hash).not.toBe(initialAsset.hash);
     } finally {
-      writeFileSync(handlerPath, originalHandler);
-      writeFileSync(testPath, originalTest);
-      rmSync(nestedDirectory, { recursive: true, force: true });
+      rmSync(fixtureDirectory, { recursive: true, force: true });
     }
+    expect(existsSync(fixtureDirectory)).toBe(false);
   });
 });
