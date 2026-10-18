@@ -30,14 +30,18 @@ VS Codeには、少なくともWSL拡張機能とDev Containers拡張機能を�
 
 ### GitHubアカウントとGit
 
-プロジェクト管理者からリポジトリへのアクセスを受けます。SSHまたはHTTPSでGitHubへ接続できるようにし、Gitの表示名とメールアドレスを設定します。以下はDev Container内で設定する例です。
+プロジェクト管理者からリポジトリへのアクセスを受け、cloneする**前に**privateリポジトリへのアクセス権限と認証方法を確認します。HTTPSではOSやGit Credential Managerなどの認証機構、SSHではGitHubアカウントへ登録したSSH鍵を使ってcloneします。WSLホスト側にGitHub CLIを必ずインストールする必要はありません。
+
+WSLホスト側のGit認証は`git clone`や`git push`で使う認証であり、Dev Container内の`gh auth login`はGitHub CLIでIssueやPRを操作するための認証です。別の環境として扱い、それぞれ必要な場所で設定します。認証トークンや秘密鍵をソースコード、Git管理対象ファイル、シェル履歴へ保存しないでください。
+
+Gitの表示名とメールアドレスを設定します。以下はDev Container内で設定する例です。
 
 ```bash
 git config --global user.name "あなたの名前"
 git config --global user.email "あなたのメールアドレス"
 ```
 
-## 2. リポジトリの取得とDev Container起動
+## 2. ローカルでのリポジトリ取得とDev Container起動
 
 WSL側のファイルシステムにcloneします。ファイル操作性能のため、Windows側の`/mnt/c/...`ではなく、たとえば`~/projects/...`を推奨します。
 
@@ -61,7 +65,18 @@ source .venv/bin/activate
 
 Windowsなど別環境で作成済みの`.venv`がある場合は、初回作成前に別名へ退避してください。Pythonバージョンを変える場合も、既存の`.venv`を退避してからコンテナを再ビルドします。
 
-## 3. コンテナと個人認証の確認
+## 3. GitHub Codespacesを利用する場合
+
+GitHub Codespacesでも、リポジトリにある`.devcontainer/devcontainer.json`を利用して開発環境を作成できます。Codespacesを利用する場合、ローカルのWSL2とDocker Engineのセットアップは不要です。
+
+1. GitHub上で対象リポジトリを開き、開発するブランチを選択します。
+2. **Code → Codespaces** を開き、**Create codespace** を選択します。
+3. ブラウザーまたはVS CodeでCodespaceを開き、環境構築の完了を待ちます。
+4. [GitHub公式ドキュメント](https://docs.github.com/en/codespaces/developing-in-a-codespace/creating-a-codespace-for-a-repository)を参照し、組織の利用・課金方針と利用可能な作成方法を確認します。
+
+CodespaceはローカルのDev Containerとは別の実行環境です。ClineなどのAIツールの認証は、利用する環境ごとに設定してください。認証情報をリポジトリへ保存しない方針はCodespacesでも同じです。
+
+## 4. コンテナと個人認証の確認
 
 コンテナ内の新しいターミナルで、環境を確認します。
 
@@ -78,22 +93,22 @@ whoami
 
 Pythonは3.12系、Node.jsは24系、ユーザーは`vscode`になる想定です。コンテナ作成時に、現在のワークスペースだけをGitの`safe.directory`へ登録します。
 
-GitHub CLIへログインします。対話画面でGitHub.com、利用するGitプロトコル、ブラウザー認証を選びます。
+Dev ContainerまたはCodespace内でGitHub CLIを使う場合はログインします。対話画面でGitHub.com、利用するGitプロトコル、ブラウザー認証を選びます。
 
 ```bash
 gh auth login
 gh auth status
 ```
 
-Dev Containerを削除・再作成すると、コンテナ内のGit設定とGitHub CLI認証は失われます。その場合は再設定してください。
+Dev ContainerまたはCodespaceを削除・再作成すると、コンテナ内のGit設定とGitHub CLI認証は失われる場合があります。その場合は再設定してください。
 
-## 4. AI開発ツールの準備
+## 5. AI開発ツールの準備
 
 Dev ContainerはCline拡張機能を自動インストールします。インストール後、VS Codeのサイドバーから利用するプロバイダー、モデル、認証を各自で設定します。手順は[Clineの公式ドキュメント](https://docs.cline.bot/getting-started/installing-cline)を参照してください。
 
 APIキーはClineの設定画面など、個人の安全な認証領域へ入力します。Dockerfile、`.devcontainer/`配下、Git管理対象の設定ファイル、コミットには保存しません。別のAI拡張機能を使う場合は、個人環境で追加するか、プロジェクトとして標準化する必要がある場合は管理者・チームで検討します。
 
-## 5. 依存関係と初回検証
+## 6. 依存関係と初回検証
 
 アプリケーション依存関係はDev Containerでは自動導入しません。コンテナ内で次を実行します。
 
@@ -110,7 +125,7 @@ npm run synth
 
 `Dockerfile`だけを`docker build`しても、Node.js Feature、VS Code拡張機能、`.venv`作成は適用されません。開発環境の構築にはDev Containersを使用してください。`devcontainer.json`やDockerfileを変更した場合は **Dev Containers: Rebuild Container** を実行します。
 
-## 6. 会社ネットワーク・プロキシの確認
+## 7. 会社ネットワーク・プロキシの確認
 
 会社環境では、clone、Dockerイメージ取得、VS Code拡張機能、npm、PyPI、GitHub CLI、AIサービスへの通信が許可されているかを確認します。プロキシ、独自CA証明書、VPN、パッケージレジストリの設定が必要な場合は、会社の手順に従って各自の環境へ設定します。
 
@@ -118,9 +133,10 @@ npm run synth
 
 ## 開発開始チェックリスト
 
-- [ ] WSL2、Linux、Docker Engine、VS Code、WSL / Dev Containers拡張機能を手動で準備した
-- [ ] WSL側のファイルシステムへリポジトリをcloneした
-- [ ] VS CodeでWSL接続後、Dev Containerを起動できた
+- [ ] ローカル開発の場合、WSL2、Linux、Docker Engine、VS Code、WSL / Dev Containers拡張機能を手動で準備した
+- [ ] clone前にprivateリポジトリへのアクセス権限と、HTTPSまたはSSHの認証を確認した
+- [ ] ローカル開発の場合、WSL側のファイルシステムへリポジトリをcloneし、VS CodeでWSL接続後にDev Containerを起動できた
+- [ ] Codespacesを利用する場合、GitHub上でCodespaceを作成し、既存のDev Container定義による環境構築を完了した
 - [ ] コンテナ内でPython 3.12系、Node.js 24系、Git、GitHub CLIを確認できた
 - [ ] Gitの表示名・メールアドレスを設定し、`gh auth status`でGitHub認証を確認した
 - [ ] Clineなど利用するAIツールの個人認証を完了し、認証情報をリポジトリへ保存していない
