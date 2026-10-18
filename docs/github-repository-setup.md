@@ -91,7 +91,7 @@ workflowは必要な権限をYAMLで明示していますが、リポジトリ�
 
 ### AI Issueワークフローの有効化
 
-`ai-question.yml`と`ai-coding.yml`は、既定ブランチに存在し、対応するラベルをIssueへ付与したときに起動します。利用する場合はGitHub管理画面で次を設定します。
+`ai-question.yml`と`ai-coding.yml`は、既定ブランチに存在すると利用できます。`ai-coding.yml`は対応するラベルをIssueへ付与したときに起動します。`ai-question.yml`は`ai-question`ラベルに加え、OWNER、MEMBER、COLLABORATORがIssueコメントで`@cline`を付けたときにも起動します。利用する場合はGitHub管理画面で次を設定します。
 
 | 種別 | 名前 | 用途 | 必須性 |
 | --- | --- | --- | --- |
