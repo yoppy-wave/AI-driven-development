@@ -1,10 +1,30 @@
 # GitHubリポジトリの初回設定
 
-このテンプレートからリポジトリを作成した後、GitHub上で一度設定する項目をまとめます。リポジトリ内のワークフローやルールファイルだけでは、保護ブランチへの直接push禁止などのサーバー側制限は有効になりません。
+この文書は、テンプレートから作成したプロジェクトを利用可能にするために、**プロジェクト管理者**が一度行う設定をまとめたものです。開発者個人の端末準備は[開発者セットアップ](developer-setup.md)、日々の実装・PR・AI Issueの利用は[開発ガイド](development-guide.md)を参照してください。
 
-## ブランチ構成
+リポジトリ内の設定ファイルをコミットしただけでは、GitHubやAWSの管理画面で行う保護・権限・認証の設定は有効になりません。ここでは両者を明確に区別します。
 
-次のブランチを作成します。
+## 1. プロジェクトとアクセスの準備
+
+### GitHub Organizationとリポジトリ
+
+1. チーム開発では、Organization配下にリポジトリを作成します。個人開発では個人アカウント配下でも利用できます。
+2. 公開範囲（public / private / internal）は、ソースコード、Issue、Actionsログ、利用するSecretsの取り扱い方針に合わせて決めます。公開リポジトリでもSecretsの値は公開されませんが、workflowやログに秘密情報を出力しない運用が必要です。
+3. テンプレートから作成した場合も、不要な履歴や設定を引き継いでいないかを確認します。
+4. 初期段階の個人開発では、現在の既定ブランチである`main`を維持できます。チーム開発へ移行する時点で、以下のブランチ構成と保護を有効化します。
+
+### メンバー・Team・権限
+
+- **個人開発**: リポジトリ所有者だけで運用できます。管理権限を他者へ安易に付与しません。
+- **チーム開発**: Organizationで少なくとも開発者、Product Owner（PO）、リリース責任者を分けます。Teamを使う場合は、CODEOWNERSで参照できるvisible Teamにします。
+- リポジトリ管理、Rulesetのbypass、Environmentの承認、AWS IAM管理は必要最小限の担当者だけに付与します。通常の開発者には、PR作成・レビューに必要な権限を付与します。
+- 外部協力者には、必要な期間と範囲に限った権限を設定します。fork PRはpreview環境の対象外です。
+
+## 2. ブランチとPR保護
+
+### チーム開発のブランチ構成
+
+チーム開発では次の構成を使用します。
 
 ```text
 prod                    本番相当の安定ブランチ
@@ -12,17 +32,16 @@ prod                    本番相当の安定ブランチ
    └─ feature/<内容>    個別開発ブランチ
 ```
 
-- `prod` は本番へ出す変更だけを受け入れます。
-- `stg` は複数の開発ブランチを統合して検証します。
-- 実装は `stg` を起点に作成した `feature/<内容>` または `fix/<内容>` ブランチで行います。
-- 日常の変更は `feature/*` または `fix/*` から `stg` へのPRで取り込みます。
-- リリース可能なまとまりになった時点で、`stg` から `prod` へのPRを作成します。
+- 実装は`stg`から作成した`feature/<内容>`または`fix/<内容>`で行います。
+- 日常の変更は`feature/*`または`fix/*`から`stg`へのPRで取り込みます。
+- リリース可能なまとまりで`stg`から`prod`へのPRを作成します。
+- `prod`と`stg`はGitHub上またはローカルGitで作成してリモートへpushします。`prod`を既定ブランチにするかは、チームの移行方針に合わせて決めます。
 
-`prod` と `stg` を新規作成する場合は、GitHubのブランチ画面またはローカルGitで作成してリモートへpushします。既存の既定ブランチを残すか、`prod` を既定ブランチに変更するかは、チームの移行方針に合わせて決めてください。
+現在の個人開発での`main`中心の進め方は[開発ガイド](development-guide.md#個人開発main中心)を参照してください。
 
-## チーム開発向け設定ファイル
+### リポジトリ内の設定ファイル
 
-次のファイルは、すべて `disabled` のRuleset定義またはテンプレートです。現在の一人開発ではGitHubに適用・有効化しません。
+次のファイルは、チーム開発でGitHubへインポート・有効化するための**disabled状態のテンプレート**です。ファイルだけではGitHubの保護は有効になりません。
 
 ```text
 .github/rulesets/stg.json
@@ -31,86 +50,123 @@ prod                    本番相当の安定ブランチ
 .github/CODEOWNERS.example
 ```
 
-- `stg.json` は、PR、開発者1人以上の承認、CI、force push禁止などの品質ゲートを担当します。
-- `prod.json` は、PR、POによるCODEOWNERS承認、CI、force push禁止などの品質ゲートを担当します。
-- `prod-merge-actors.json` は、`prod` の更新をリリース責任者に限定するための **Restrict updates** だけを担当します。
+- `stg.json`: PR必須、作成者以外の開発者1人以上の承認、CI、会話解決、force push・削除の禁止。
+- `prod.json`: PR必須、POのCODEOWNERS承認、CI、会話解決、force push・削除の禁止。
+- `prod-merge-actors.json`: `prod`の更新者をリリース責任者に限定するための**Restrict updates**のみ。
+- `CODEOWNERS.example`: POにレビューを要求するための雛形。実ファイル`.github/CODEOWNERS`はまだ存在しません。
 
-`stg.json` と `prod.json` に **Restrict updates** を入れないことが重要です。リリース責任者が更新者制限を通過するための例外権限を、品質ゲートのRulesetへ与えると、PO承認やCIまで回避できるためです。
+`stg.json`と`prod.json`に**Restrict updates**を入れないことが重要です。品質ゲートと更新者制限を分離することで、リリース責任者に更新者制限だけを通過させても、PO承認やCIを回避させません。
 
-## 必須ステータスチェック
+### GitHub管理画面で有効化する設定
 
-Ruleset JSONには、既存ワークフローの `name` と job ID から得られる次のcheck contextを指定しています。
+チーム開発へ移行するときは、以下を順に実施します。
+
+1. `prod`と`stg`を作成する。この時点ではRulesetを有効化しない。
+2. `.github/CODEOWNERS.example`を`.github/CODEOWNERS`へコピーし、`@YOUR_ORG/product-owners`をPOのvisible TeamまたはGitHubユーザーに置換する。
+3. **CODEOWNERSを含むコミットを先に`prod`へ配置する。** `prod` RulesetでCODEOWNERS承認を要求する前に、対象ブランチ上にこのファイルが必要です。
+4. `stg` / `prod`宛てのテストPRを作成し、必須チェックが表示・成功することを確認する。
+5. GitHubの **Settings → Rules → Rulesets** で3つのJSONをインポートし、直後は`disabled`のままであることを確認する。
+6. `prod-merge-actors.json`のbypass listにリリース責任者のユーザーまたはTeamを追加し、bypass modeを **For pull requests only** にする。直接pushを許す **Always allow** は選ばない。
+7. `stg` Rulesetを有効化し、PR・他者承認・CI・会話解決を満たさない変更がマージできないことを確認する。
+8. `prod.json`と`prod-merge-actors.json`を有効化し、PO以外の承認だけではマージできず、必要な品質ゲートを満たしたPRをリリース責任者がマージできることを確認する。
+
+#### 必須ステータスチェック
+
+Rulesetの必須チェックには、次のcheck contextを指定します。
 
 | check context | 定義元 |
 | --- | --- |
-| `Regression tests / regression` | `.github/workflows/regression.yml` の workflow名 `Regression tests`、job ID `regression` |
-| `Pull request policy / validate` | `.github/workflows/pull-request-policy.yml` の workflow名 `Pull request policy`、job ID `validate` |
+| `Regression tests / regression` | `.github/workflows/regression.yml` |
+| `Pull request policy / validate` | `.github/workflows/pull-request-policy.yml` |
 
-回帰テストはすべてのpushに加え、`stg` または `prod` 宛てのPRでも実行します。Rulesetを有効化する前に、対象ブランチへのPRで両方のcheck contextが実際に表示・成功することを確認してください。workflow名またはjob IDを変更した場合は、Rulesetの必須チェックも更新します。
+回帰テストは全ブランチへのpush、および`stg`または`prod`宛てPRで実行されます。PRポリシーは、`prod`宛てを同一リポジトリの`stg`からだけ、`stg`宛てを`feature/*`または`fix/*`からだけ許可します。workflow名またはjob IDを変えた場合は、Ruleset側の必須チェックも更新します。
 
-## PR元ブランチの検証
+## 3. GitHub Actions、AI Issueワークフロー、Secrets
 
-`.github/workflows/pull-request-policy.yml` は、次を検証します。
+### GitHub Actionsの実行権限
 
-- `prod` 宛てPRは、同一リポジトリの `stg` ブランチだけをPR元として許可する。
-- `stg` 宛てPRは、`ALLOWED_STG_HEAD_PATTERNS` に指定したパターンだけをPR元として許可する。
+GitHubの **Settings → Actions → General** で、リポジトリ方針に沿ってActionsを許可します。`ai-coding.yml`がドラフトPRを作成するには、**Workflow permissions**でGitHub Actionsによるプルリクエスト作成を許可します。
 
-このワークフローは `pull_request_target` でベースブランチ側の検証スクリプトを実行します。PRでポリシー検証コード自体を変更して必須チェックを弱めることを防ぐためであり、PR元のコードはcheckout・実行しません。
+workflowは必要な権限をYAMLで明示していますが、リポジトリ設定でより強い制限を掛ける場合は、CI、AI Issueワークフロー、CDK workflowが必要とする権限と両立することをテストしてください。
 
-現在の許可パターンは `feature/*,fix/*` です。将来 `release/*` などを許可する場合は、ワークフローの `ALLOWED_STG_HEAD_PATTERNS` を変更します。
+### AI Issueワークフローの有効化
 
-この検証はPRの宛先、PR元ブランチ名、PR元リポジトリを確認します。ブランチ名やGit履歴だけでは「作成時にstgから派生した」という操作履歴を完全には証明できないため、その点はPRレビューと運用で補完します。
+`ai-question.yml`と`ai-coding.yml`は、既定ブランチに存在し、対応するラベルをIssueへ付与したときに起動します。利用する場合はGitHub管理画面で次を設定します。
 
-## チーム開発への移行と有効化手順
+| 種別 | 名前 | 用途 | 必須性 |
+| --- | --- | --- | --- |
+| Repository secret | `OPENAI_API_KEY` | Cline CLIのOpenAI API認証 | AI Issueワークフローを使う場合は必須 |
+| Repository variable | `CLINE_MODEL` | 使用するOpenAI APIモデルID。未設定時は`gpt-5.4` | 任意 |
+| Repository secret | `AI_CODING_PR_TOKEN` | AI作成PRの後続CIを自動実行したい場合のPAT | 任意 |
 
-以下はOrganizationリポジトリで、開発者、PO、リリース責任者を分ける手順です。個人所有リポジトリではTeamを使えないため、必要に応じてGitHubユーザーを指定してください。
+- `AI_CODING_PR_TOKEN`を使う場合は、`contents: write`と`pull-requests: write`だけを必要範囲として付与します。未設定時は`GITHUB_TOKEN`を使います。
+- GitHub上で`ai-question`と`ai-coding`ラベルを作成します。
+- OpenAI APIキーは利用上限を設定し、信頼できる担当者だけが`ai-coding`ラベルを付与できる運用にします。APIキー、PAT、AWS認証情報をリポジトリやStack Outputへ保存しません。
+- AI Issueワークフローの利用方法・制約は[開発ガイド](development-guide.md#issueからaiを利用する)を参照してください。
 
-1. `prod` と `stg` ブランチを作成する。この時点ではRulesetを有効化しない。
-2. `.github/CODEOWNERS.example` を `.github/CODEOWNERS` にコピーし、`@YOUR_ORG/product-owners` をPOのvisible TeamまたはPOのGitHubユーザーへ置換する。
-3. **CODEOWNERSを含むコミットを先に `prod` ブランチへ配置する。** `prod.json` のCODEOWNERS承認必須を有効にする前に、このファイルが `prod` に存在しなければ、PO承認は要求されない。
-4. `stg` / `prod` 宛てのテストPRを作成し、`Regression tests / regression` と `Pull request policy / validate` が成功することを確認する。
-5. GitHubの **Settings → Rules → Rulesets** で、`.github/rulesets/stg.json` と `.github/rulesets/prod.json` をインポートする。インポート直後も `disabled` のままであることを確認する。
-6. `.github/rulesets/prod-merge-actors.json` をインポートする。インポートされたRulesetのbypass listに、リリース責任者のユーザーまたはTeamを追加し、bypass modeを **For pull requests only** にする。直接pushを許す `Always allow` は選ばない。
-7. `stg` 用Rulesetを有効化する。開発者はPRを作成でき、作成者以外の開発者1人以上の承認、必須CI、会話解決を満たしたPRだけをマージできることを確認する。
-8. `prod.json` と `prod-merge-actors.json` を有効化する。`prod` のCODEOWNERSにはPOだけを指定し、PO以外の承認ではマージできないことを確認する。
+## 4. GitHub EnvironmentsとAWS OIDC
 
-### prod のRuleset組み合わせ
+### 現在の状態
 
-`prod` には次のRulesetが同時に適用されます。
+`.github/cicd/application.json`がCI/CDの有効化契約です。現在は`ci.enabled`だけが`true`で、AWS CDK、PR preview、development / staging / productionへのデプロイはすべて`false`です。この状態ではAWS認証、`cdk deploy`、`cdk destroy`はworkflowから実行されません。
 
-| Ruleset | 担当 | リリース責任者へのbypass |
-| --- | --- | --- |
-| `Protect prod quality gates` | PR必須、POのCODEOWNERS承認、CI、force push禁止、削除禁止 | なし |
-| `Restrict prod merge actors` | `prod` の更新者を限定 | リリース責任者だけ、**For pull requests only** |
+AWS CDKのStack構成、previewの安全策、cleanupの設計は[AWS CDKアーキテクチャ](aws-cdk-architecture.md)を参照してください。
 
-リリース責任者は2つ目のRulesetだけをPR上で通過できます。1つ目にはbypassがないため、リリース責任者でもPO承認・必須CI・PR経由を回避できません。PO承認とCIを満たしたPRは、リリース責任者が更新者制限を通過してマージできます。
+### AWS・GitHub管理画面での準備
 
-Rulesetのbypass list、Repository role、TeamのメンバーシップはGitHub側の設定であり、JSONのテンプレートには固定しません。ルールを有効にする前に、管理者を含めて品質ゲートを無条件に回避できるbypassを設定していないことを確認してください。
+AWSデプロイを有効化する前に、プロジェクト管理者は次を準備します。
 
-## 日常の開発手順
+1. 対象環境のAWSアカウント、リージョン、Stack名、変更・削除対象、データのバックアップ・復旧方法を決める。
+2. GitHub Actions OIDC用のIAM identity providerと、環境ごとに最小権限のIAM Roleを作成する。アクセスキーは使わず、Role ARNをソースやOutputへ書かない。
+3. GitHubの **Settings → Environments** で`preview`、`development`、`staging`、`production`を作成する。対象のRole ARNを、各Environmentの`AWS_ROLE_TO_ASSUME` **Environment Secret**として設定する。
+4. `preview`、`staging`、`production`にはrequired reviewersを設定する。productionには承認者と必要なdeployment branch policyも設定する。developmentも組織方針に応じて承認・ブランチ制限を設定する。
+5. `application.json`で、必要な`cdk.enabled`、`previewEnvironmentEnabled`、`deployments`だけを明示的に`true`にする。
+6. 承認済みの範囲で、対象Stackと環境を限定してCI/CDの挙動を確認する。
 
-```text
-1. stg を最新化する
-2. stg から feature/<内容> または fix/<内容> を作成する
-3. 作業ブランチで実装・テスト・コミット・pushを行う
-4. 作業ブランチから stg 宛てのPRを作成する
-5. GitHub上でレビュー・CI確認後にPRをマージする
-6. stg で統合・検証する
-7. stg から prod 宛てのPRを作成する
-8. GitHub上でレビュー・CI確認後にPRをマージする
-```
+再利用workflowは`workflow_call.secrets`で必要なSecret名を明示し、callerも`AWS_ROLE_TO_ASSUME`だけを明示的に渡します。jobに割り当てたGitHub Environmentの同名Secretが優先されます。
 
-マージはGitHub上のPRを通じて行います。RulesetとPRポリシーは、直接pushや許可されないPR元をサーバー側で拒否するための設定です。
+## 5. 開発者の追加・削除
+
+### 追加時
+
+- Organizationメンバーまたは外部協力者として招待し、必要なTeamと最小権限を割り当てる。
+- チーム開発では、開発ガイド、PRレビュー責任、対象ブランチ、AI Issueラベルの利用権限を共有する。
+- AWSコンソールや長期アクセスキーを開発者へ配る必要はありません。必要なクラウド操作はEnvironmentで保護したGitHub Actions OIDC経由に限定します。
+
+### 削除・異動時
+
+- Organization、Team、リポジトリ協力者、CODEOWNERS、Ruleset bypass list、Environment reviewersから対象者を外す。
+- 個人に発行したPAT、APIキー、外部サービスのアカウント・トークンを失効またはローテーションする。
+- AWS IAM Roleの信頼ポリシー、IAM Identity Centerなど、対象者に紐付くアクセス経路を見直す。
+- 所有中のIssue、PR、レビュー待ち、リリース責任を別担当へ引き継ぐ。
 
 ## 設定完了チェックリスト
 
-- [ ] `prod` ブランチを作成した
-- [ ] `stg` ブランチを作成した
-- [ ] `.github/CODEOWNERS` を `prod` ブランチへ配置した
-- [ ] `stg` 用Rulesetを有効化した
-- [ ] `prod` 用品質ゲートRulesetを有効化した
-- [ ] `prod` 用更新者制限Rulesetを有効化し、リリース責任者をPR限定bypassに設定した
-- [ ] `stg` と `prod` への直接pushが拒否されることを確認した
-- [ ] `prod` と `stg` へのPR作成を確認した
-- [ ] `Regression tests / regression` と `Pull request policy / validate` を必要なRulesetの必須チェックとして確認した
-- [ ] `feature/* → stg`、`stg → prod` のPR運用をチームで共有した
+### 全プロジェクト共通
+
+- [ ] リポジトリの所有者と公開範囲を決定した
+- [ ] 管理者と通常開発者の権限を最小権限で設定した
+- [ ] `main`または採用する既定ブランチを確認した
+- [ ] GitHub Actionsの実行方針とWorkflow permissionsを確認した
+- [ ] AI Issueワークフローを使う場合、必要なラベルとSecrets / variablesを設定した
+- [ ] APIキー、PAT、AWS認証情報をリポジトリへ保存していない
+
+### チーム開発へ移行する場合
+
+- [ ] `prod`と`stg`を作成した
+- [ ] `.github/CODEOWNERS`を`prod`へ配置した
+- [ ] `stg` / `prod`宛てのテストPRで必須チェックの成功を確認した
+- [ ] `stg`用Rulesetを有効化した
+- [ ] `prod`用品質ゲートRulesetを有効化した
+- [ ] `prod`用更新者制限Rulesetを有効化し、リリース責任者をPR限定bypassに設定した
+- [ ] `stg`と`prod`への直接pushが拒否されることを確認した
+- [ ] `feature/* → stg`、`stg → prod`のPR運用をチームで共有した
+
+### AWS CDKを有効化する場合
+
+- [ ] 対象AWSアカウント、リージョン、Stack、変更・削除対象、復旧方法を確認した
+- [ ] GitHub Actions OIDCと環境別・最小権限のIAM Roleを設定した
+- [ ] `preview`、`development`、`staging`、`production` Environmentと`AWS_ROLE_TO_ASSUME`を設定した
+- [ ] `preview`、`staging`、`production`のrequired reviewersを設定した
+- [ ] `.github/cicd/application.json`で必要な機能だけを`true`にした
+- [ ] 有効化対象のworkflowを、承認済みの環境で確認した
