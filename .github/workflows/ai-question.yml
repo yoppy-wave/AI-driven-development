@@ -3,6 +3,8 @@ name: Answer AI questions
 on:
   issues:
     types: [labeled]
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read
@@ -11,10 +13,19 @@ permissions:
 concurrency:
   group: ai-question-${{ github.event.issue.number }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   answer:
-    if: github.event.label.name == 'ai-question'
+    if: >-
+      (github.event_name == 'issues' &&
+       github.event.label.name == 'ai-question') ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request == null &&
+       contains(github.event.comment.body, '@cline') &&
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
+       github.event.comment.user.type != 'Bot' &&
+       github.event.comment.user.login != 'github-actions[bot]')
     runs-on: ubuntu-24.04
     timeout-minutes: 35
 
@@ -38,10 +49,19 @@ jobs:
       - name: Install Cline CLI
         run: npm install --global cline@3.0.70
 
+      - name: Retrieve the issue conversation
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: gh api --paginate --slurp "repos/$GH_REPO/issues/$ISSUE_NUMBER/comments?per_page=100" > "$RUNNER_TEMP/ai-question-comments.json"
+
       - name: Prepare the question
         env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
+          TRIGGER_COMMENT_ID: ${{ github.event.comment.id || '' }}
         run: |
           python .github/scripts/ai_question.py prepare
           mkdir -p "$HOME/.cline/hooks"

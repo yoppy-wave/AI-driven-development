@@ -21,6 +21,7 @@ class AiQuestionTests(unittest.TestCase):
             {
                 "RUNNER_TEMP": self.temp.name,
                 "GITHUB_WORKSPACE": self.temp.name,
+                "ISSUE_NUMBER": "42",
                 "ISSUE_TITLE": "境界値を確認",
                 "ISSUE_BODY": "0件の場合は？",
                 "GITHUB_SHA": "abc123",
@@ -29,6 +30,11 @@ class AiQuestionTests(unittest.TestCase):
         )
         self.environment.start()
         self.addCleanup(self.environment.stop)
+
+    def write_comments(self, pages: list[list[dict[str, object]]]) -> None:
+        (self.temp_path / "ai-question-comments.json").write_text(
+            json.dumps(pages, ensure_ascii=False), encoding="utf-8"
+        )
 
     def write_events(self, text: str, reason: str = "completed") -> None:
         events = [
@@ -41,12 +47,25 @@ class AiQuestionTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def test_prepare_passes_issue_and_extract_formats_answer(self) -> None:
+    def test_prepare_passes_issue_history_and_extract_formats_answer(self) -> None:
+        self.write_comments(
+            [[
+                {"id": 100, "body": "最初の質問", "created_at": "2026-10-18T10:00:00Z", "user": {"login": "alice"}},
+                {"id": 101, "body": "補足です", "created_at": "2026-10-18T10:01:00Z", "user": {"login": "bob"}},
+            ]]
+        )
         ai_question.prepare()
         prompt = (self.temp_path / "ai-question-prompt.txt").read_text(encoding="utf-8")
         self.assertEqual(
             json.loads(prompt[prompt.index("{") :]),
-            {"title": "境界値を確認", "body": "0件の場合は？"},
+            {
+                "issue": {"number": "42", "title": "境界値を確認", "body": "0件の場合は？"},
+                "conversation": [
+                    {"id": 100, "author": "alice", "created_at": "2026-10-18T10:00:00Z", "body": "最初の質問"},
+                    {"id": 101, "author": "bob", "created_at": "2026-10-18T10:01:00Z", "body": "補足です"},
+                ],
+                "latest_request": None,
+            },
         )
         self.write_events("README.md:1 を確認しました。")
         ai_question.extract()
@@ -54,6 +73,36 @@ class AiQuestionTests(unittest.TestCase):
         self.assertIn("README.md:1", answer)
         self.assertNotIn("途中経過", answer)
         self.assertIn("`abc123`", answer)
+
+    def test_prepare_uses_the_fixed_trigger_comment_and_excludes_later_comments(self) -> None:
+        self.write_comments(
+            [[
+                {"id": 100, "body": "質問A", "created_at": "2026-10-18T10:00:00Z", "user": {"login": "alice"}},
+                {"id": 101, "body": "@cline 質問B", "created_at": "2026-10-18T10:01:00Z", "user": {"login": "alice"}},
+            ], [
+                {"id": 102, "body": "@cline 質問C", "created_at": "2026-10-18T10:02:00Z", "user": {"login": "alice"}},
+            ]]
+        )
+        with patch.dict(os.environ, {"TRIGGER_COMMENT_ID": "101"}):
+            ai_question.prepare()
+        prompt = (self.temp_path / "ai-question-prompt.txt").read_text(encoding="utf-8")
+        question = json.loads(prompt[prompt.index("{") :])
+        self.assertEqual([comment["id"] for comment in question["conversation"]], [100, 101])
+        self.assertEqual(question["latest_request"]["id"], 101)
+        self.assertNotIn("質問C", prompt)
+
+    def test_prepare_rejects_missing_trigger_comment_and_invalid_history(self) -> None:
+        self.write_comments([[{"id": 100, "body": "質問", "created_at": "2026-10-18T10:00:00Z", "user": {"login": "alice"}}]])
+        with patch.dict(os.environ, {"TRIGGER_COMMENT_ID": "101"}), self.assertRaises(SystemExit):
+            ai_question.prepare()
+        self.write_comments([[{"id": "invalid", "body": "質問", "created_at": "2026-10-18T10:00:00Z", "user": {"login": "alice"}}]])
+        with self.assertRaises(SystemExit):
+            ai_question.prepare()
+
+    def test_prepare_rejects_a_conversation_that_exceeds_the_input_limit(self) -> None:
+        self.write_comments([[{"id": 100, "body": "質問", "created_at": "2026-10-18T10:00:00Z", "user": {"login": "alice"}}]])
+        with patch.object(ai_question, "MAX_CONVERSATION_BYTES", 1), self.assertRaises(SystemExit):
+            ai_question.prepare()
 
     def test_extract_rejects_token_in_answer(self) -> None:
         self.write_events("test-secret-token")
