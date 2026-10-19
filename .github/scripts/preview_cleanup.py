@@ -1,144 +1,133 @@
 #!/usr/bin/env python3
-"""Persist and recover immutable, stateful AWS preview cleanup records."""
+"""Resolve branch-based preview stacks and validate CloudFormation ownership."""
 
 import argparse
 import json
+import os
 import re
-import sys
+import subprocess
+from pathlib import Path
 from typing import Any
 
-MARKER = "<!-- cicd-preview-cleanup:v2 "
-BOT_LOGIN = "github-actions[bot]"
-COMMIT_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
-ACCOUNT_ID_PATTERN = re.compile(r"^[0-9]{12}$")
-STATUSES = ("pending", "active", "destroying", "destroyed")
+ROOT = Path(__file__).resolve().parents[2]
+MANAGED_BY = "ai-driven-development"
 
 
-def fail(message: str) -> None:
-    raise ValueError(message)
+def preview_stack_name(branch: str) -> str:
+    # This exact implementation is also imported by the CDK Stack definition.
+    return run(["node", str(ROOT / "lib" / "preview-stack-name.cjs"), branch]).strip()
 
 
-def metadata(
-    pull_request: int,
-    stack_name: str,
-    region: str,
-    source_ref: str,
-    workflow_ref: str,
-    account_id: str = "",
-    status: str = "pending",
-) -> dict[str, str]:
-    if pull_request < 1:
-        fail("pull request number must be positive")
-    if stack_name != f"app-pr-{pull_request}":
-        fail("preview stack name must exactly match the pull request stack name")
+def run(command: list[str]) -> str:
+    result = subprocess.run(command, text=True, capture_output=True)
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or "command failed")
+    return result.stdout
+
+
+def aws(region: str, *arguments: str) -> str:
+    return run(["aws", *arguments, "--region", region, "--output", "json"])
+
+
+def validate_identity(region: str, role_arn: str) -> tuple[str, str]:
     if not re.fullmatch(r"[a-z]{2}-[a-z]+-[0-9]+", region):
-        fail("region must be an AWS region identifier")
-    for field, value in (("source_ref", source_ref), ("workflow_ref", workflow_ref)):
-        if not isinstance(value, str) or not COMMIT_SHA_PATTERN.fullmatch(value):
-            fail(f"{field} must be a full commit SHA")
-    if account_id and not ACCOUNT_ID_PATTERN.fullmatch(account_id):
-        fail("account_id must be a 12-digit AWS account ID when present")
-    if status not in STATUSES:
-        fail(f"status must be one of: {', '.join(STATUSES)}")
-    return {
-        "stack_name": stack_name,
-        "region": region,
-        "source_ref": source_ref,
-        "workflow_ref": workflow_ref,
-        "account_id": account_id,
-        "status": status,
-    }
+        raise ValueError("region must be an AWS region identifier")
+    role = re.fullmatch(r"arn:(aws(?:-us-gov|-cn)?):iam::([0-9]{12}):role/.+", role_arn)
+    if role is None:
+        raise ValueError("AWS_ROLE_TO_ASSUME must identify the expected AWS account")
+    partition, account = role.groups()
+    identity = json.loads(aws(region, "sts", "get-caller-identity"))
+    if identity.get("Account") != account:
+        raise ValueError("authenticated AWS account does not match the configured role")
+    return partition, account
 
 
-def comment_body(values: dict[str, str]) -> str:
-    return f"{MARKER}{json.dumps(values, separators=(',', ':'), sort_keys=True)} -->"
-
-
-def metadata_from_comment(body: object, login: object, pull_request: int) -> dict[str, str] | None:
-    if login != BOT_LOGIN or not isinstance(body, str) or not body.startswith(MARKER) or not body.endswith(" -->"):
-        return None
+def describe_stack(region: str, stack_name: str) -> dict[str, Any] | None:
     try:
-        values = json.loads(body[len(MARKER) : -4])
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(values, dict):
-        return None
-    try:
-        return metadata(
-            pull_request,
-            values.get("stack_name"),
-            values.get("region"),
-            values.get("source_ref"),
-            values.get("workflow_ref"),
-            values.get("account_id", ""),
-            values.get("status", "pending"),
-        )
-    except ValueError:
-        return None
+        response = aws(region, "cloudformation", "describe-stacks", "--stack-name", stack_name)
+    except RuntimeError as error:
+        if "(ValidationError)" in str(error) and f"Stack with id {stack_name} does not exist" in str(error):
+            return None
+        raise
+    stacks = json.loads(response)["Stacks"]
+    if len(stacks) != 1:
+        raise ValueError("expected exactly one CloudFormation stack")
+    return stacks[0]
 
 
-def latest_target(comments: list[dict[str, Any]], pull_request: int) -> dict[str, str] | None:
-    for comment in reversed(comments):
-        values = metadata_from_comment(comment.get("body"), comment.get("user", {}).get("login"), pull_request)
-        comment_id = comment.get("id")
-        if values is not None and isinstance(comment_id, int):
-            if values["status"] == "destroyed":
-                return None
-            return {**values, "comment_id": str(comment_id)}
-    return None
+def validate_stack(stack: dict[str, Any], name: str, region: str, partition: str, account: str, pr: int) -> str:
+    if name in {"app-development", "app-staging", "app-production"}:
+        raise ValueError("shared stacks cannot be managed as previews")
+    if stack.get("StackName") != name:
+        raise ValueError("CloudFormation stack name does not match")
+    stack_id = stack.get("StackId", "")
+    if not stack_id.startswith(f"arn:{partition}:cloudformation:{region}:{account}:stack/{name}/"):
+        raise ValueError("CloudFormation stack account or region does not match")
+    tags = {tag["Key"]: tag["Value"] for tag in stack.get("Tags", [])}
+    if tags.get("app:managed-by") != MANAGED_BY or tags.get("app:preview-pr") != str(pr):
+        raise ValueError("preview stack is unmanaged or belongs to another PR")
+    return stack_id
 
 
-def comment_pages(response: object) -> list[dict[str, Any]]:
-    if not isinstance(response, list):
-        fail("GitHub comments response must be an array")
-    if all(isinstance(item, dict) for item in response):
-        return response
-    comments: list[dict[str, Any]] = []
-    for page in response:
-        if not isinstance(page, list) or not all(isinstance(item, dict) for item in page):
-            fail("GitHub comment pages must be arrays of objects")
-        comments.extend(page)
-    return comments
+def remains_closed(repository: str, pr: int, branch: str) -> bool:
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+        raise ValueError("repository must be owner/name")
+    current = json.loads(run(["gh", "api", f"repos/{repository}/pulls/{pr}"]))
+    return current["state"] == "closed" and current["head"]["ref"] == branch
 
 
-def add_metadata_arguments(command: argparse.ArgumentParser) -> None:
-    command.add_argument("--pull-request", required=True, type=int)
-    command.add_argument("--stack-name", required=True)
-    command.add_argument("--region", required=True)
-    command.add_argument("--source-ref", required=True)
-    command.add_argument("--workflow-ref", required=True)
-    command.add_argument("--account-id", default="")
-    command.add_argument("--status", required=True, choices=STATUSES)
-
-
-def values_from_args(args: argparse.Namespace) -> dict[str, str]:
-    return metadata(args.pull_request, args.stack_name, args.region, args.source_ref, args.workflow_ref, args.account_id, args.status)
+def manage(command: str, branch: str, pr: int, region: str, role_arn: str, repository: str = "") -> None:
+    if command not in ("verify", "cleanup"):
+        raise ValueError("unsupported preview operation")
+    if pr < 1:
+        raise ValueError("pull request number must be positive")
+    name = preview_stack_name(branch)
+    if command == "cleanup" and not remains_closed(repository, pr, branch):
+        print("Preview cleanup skipped: PR is open or its branch changed.")
+        return
+    partition, account = validate_identity(region, role_arn)
+    stack = describe_stack(region, name)
+    if stack is None:
+        print(f"{name}: stack does not exist; no action required.")
+        return
+    stack_id = validate_stack(stack, name, region, partition, account, pr)
+    status = stack["StackStatus"]
+    if command == "verify":
+        if status.startswith("DELETE_"):
+            raise ValueError("preview stack is being deleted or deletion failed; retry after cleanup")
+        print(f"{name}: ownership verified in {account}/{region} ({status}).")
+        return
+    if status == "DELETE_COMPLETE":
+        return
+    if status != "DELETE_IN_PROGRESS":
+        # Recheck after CloudFormation inspection and any Environment approval wait.
+        if not remains_closed(repository, pr, branch):
+            print("Preview cleanup skipped: PR reopened or its branch changed.")
+            return
+        aws(region, "cloudformation", "delete-stack", "--stack-name", stack_id)
+    # Use the validated immutable ID, so a recreated stack with the same name is never selected.
+    aws(region, "cloudformation", "wait", "stack-delete-complete", "--stack-name", stack_id)
+    print(f"{name}: deletion completed in {account}/{region}.")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    commands = parser.add_subparsers(dest="command", required=True)
-    record = commands.add_parser("record-body")
-    update = commands.add_parser("update-body")
-    extract = commands.add_parser("github-output")
-    add_metadata_arguments(record)
-    add_metadata_arguments(update)
-    extract.add_argument("--pull-request", required=True, type=int)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", choices=("stack-name", "verify", "cleanup"))
+    parser.add_argument("--branch", required=True)
+    parser.add_argument("--pull-request", type=int)
+    parser.add_argument("--region", default="")
+    parser.add_argument("--repository", default="")
     args = parser.parse_args()
-    if args.command in ("record-body", "update-body"):
-        print(comment_body(values_from_args(args)))
-        return
-    target = latest_target(comment_pages(json.load(sys.stdin)), args.pull_request)
-    if target is None:
-        print("found=false")
-        return
-    print("found=true")
-    for field, value in target.items():
-        print(f"{field}={value}")
+    if args.command == "stack-name":
+        print(preview_stack_name(args.branch))
+    else:
+        if args.pull_request is None:
+            parser.error("--pull-request is required for verify/cleanup")
+        manage(args.command, args.branch, args.pull_request, args.region, os.environ.get("AWS_ROLE_TO_ASSUME", ""), args.repository)
 
 
 if __name__ == "__main__":
     try:
         main()
-    except (ValueError, json.JSONDecodeError) as error:
+    except (ValueError, RuntimeError, KeyError) as error:
         raise SystemExit(str(error)) from None

@@ -33,25 +33,29 @@ class CicdWorkflowTests(unittest.TestCase):
     def test_aws_oidc_is_limited_to_aws_operation_jobs(self) -> None:
         self.assertIn("aws-actions/configure-aws-credentials@v5", workflow("reusable-aws-cdk.yml"))
         self.assertEqual(workflow("cicd.yml").count("id-token: write"), 5)
-        self.assertIn("permissions:\n      contents: read\n      id-token: write", workflow("cicd-preview-cleanup.yml"))
+        self.assertIn("      id-token: write", workflow("cicd-preview-cleanup.yml"))
 
-    def test_preview_comment_permissions_are_not_required_for_standard_deployments(self) -> None:
+    def test_preview_does_not_need_comment_write_permissions(self) -> None:
         adapter = workflow("reusable-aws-cdk.yml")
         self.assertNotIn("permissions:", adapter)
         cicd = workflow("cicd.yml")
-        self.assertEqual(cicd.count("issues: write"), 3)
-        self.assertEqual(cicd.count("pull-requests: write"), 3)
+        for content in (cicd, workflow("cicd-preview-cleanup.yml")):
+            self.assertNotIn("issues: write", content)
+            self.assertNotIn("pull-requests: write", content)
+            self.assertIn("pull-requests: read", content)
 
     def test_preview_rechecks_pr_state_and_head_before_aws(self) -> None:
         adapter = workflow("reusable-aws-cdk.yml")
-        self.assertEqual(adapter.count("Confirm pull request is current"), 2)
+        self.assertEqual(adapter.count("Confirm pull request is current"), 3)
         self.assertLess(adapter.index("Confirm pull request is current before AWS operation"), adapter.index("Configure AWS credentials with OIDC"))
 
     def test_cleanup_never_checks_out_or_executes_pr_source(self) -> None:
         cleanup = workflow("cicd-preview-cleanup.yml")
         self.assertIn("pull_request_target:", cleanup)
-        self.assertEqual(cleanup.count("ref: ${{ github.event.repository.default_branch }}"), 2)
-        self.assertIn("git merge-base --is-ancestor", cleanup)
+        self.assertIn("ref: ${{ github.event.repository.default_branch }}", cleanup)
+        self.assertIn("management-ref: ${{ steps.management.outputs.commit }}", cleanup)
+        self.assertIn("ref: ${{ needs.cleanup-target.outputs.management-ref }}", cleanup)
+        self.assertNotIn("github.event.pull_request.head.sha", cleanup)
         self.assertNotIn("npm ci", cleanup)
         self.assertNotIn("npm run cdk", cleanup)
 
@@ -65,16 +69,42 @@ class CicdWorkflowTests(unittest.TestCase):
 
     def test_cleanup_validates_cloudformation_identity_and_tags_before_delete(self) -> None:
         cleanup = workflow("cicd-preview-cleanup.yml")
-        for required in ("aws sts get-caller-identity", "aws cloudformation describe-stacks", "app:managed-by", "app:preview-pr", "DELETE_IN_PROGRESS", "Wait for in-progress preview stack deletion", "aws cloudformation delete-stack"):
-            self.assertIn(required, cleanup)
+        self.assertIn("python .github/scripts/preview_cleanup.py cleanup", cleanup)
+        helper = (ROOT / ".github/scripts/preview_cleanup.py").read_text(encoding="utf-8")
+        for required in ("get-caller-identity", "describe-stacks", "app:managed-by", "app:preview-pr", "DELETE_IN_PROGRESS", "delete-stack", "stack-delete-complete"):
+            self.assertIn(required, helper)
 
     def test_cleanup_handles_reopened_pr_and_missing_stack_idempotently(self) -> None:
         cleanup = workflow("cicd-preview-cleanup.yml")
-        for required in ("Confirm pull request remains closed", "does not exist", "exists=false", "status destroying", "status destroyed"):
+        for required in ("Confirm pull request remains closed", "steps.current-pr.outputs.allowed == 'true'"):
             self.assertIn(required, cleanup)
 
-    def test_cleanup_waits_for_delete_in_progress_before_recording_destroyed(self) -> None:
+    def test_disabled_cleanup_never_reaches_environment_or_aws_authentication(self) -> None:
         cleanup = workflow("cicd-preview-cleanup.yml")
-        self.assertIn("echo 'deleting=true'", cleanup)
-        self.assertIn("Wait for in-progress preview stack deletion", cleanup)
-        self.assertIn("steps.target.outputs.deleting == 'true'", cleanup)
+        self.assertIn("python .github/scripts/cicd_config.py github-output", cleanup)
+        self.assertIn("if: needs.cleanup-target.outputs.enabled == 'true' && needs.cleanup-target.outputs.cleanup-allowed == 'true'", cleanup)
+        target, aws_job = cleanup.split("\n  cleanup:\n")
+        self.assertNotIn("configure-aws-credentials", target)
+        self.assertNotIn("id-token: write", target)
+        self.assertIn("environment:\n      name: preview", aws_job)
+
+    def test_preview_stack_is_resolved_from_branch_and_passed_to_cdk(self) -> None:
+        caller = workflow("cicd.yml")
+        self.assertEqual(caller.count("preview-branch: ${{ github.event.pull_request.head.ref }}"), 2)
+        self.assertIn("needs: [ci, preview]", caller)
+        self.assertIn("operation: diff", caller)
+        self.assertIn("operation: deploy", caller)
+        adapter = workflow("reusable-aws-cdk.yml")
+        self.assertIn('preview_cleanup.py stack-name --branch "$PREVIEW_BRANCH"', adapter)
+        self.assertIn('cdk_args+=(--context "previewBranch=$PREVIEW_BRANCH")', adapter)
+        self.assertIn("STACK_NAME: ${{ steps.target.outputs.stack_name }}", adapter)
+        self.assertLess(adapter.index("Verify preview stack ownership"), adapter.index("- name: Run CDK operation"))
+
+    def test_preview_has_no_comment_state_recording_or_restoration(self) -> None:
+        for name in ("cicd.yml", "cicd-preview-cleanup.yml", "reusable-aws-cdk.yml"):
+            content = workflow(name)
+            for forbidden in ("/comments", "record-preview-cleanup", "record-body", "update-body", "app-pr-", "trusted-workflow-ref"):
+                self.assertNotIn(forbidden, content)
+        helper = (ROOT / ".github/scripts/preview_cleanup.py").read_text(encoding="utf-8")
+        for forbidden in ("MARKER", "comment_body", "latest_target", "STATUSES"):
+            self.assertNotIn(forbidden, helper)

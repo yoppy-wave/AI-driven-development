@@ -9,4 +9,5 @@ if (!environment) {
   throw new Error("The CDK context value 'environment' is required.");
 }
 
-new ApplicationStack(app, stackNameForEnvironment(environment), { environment });
+const previewBranch = app.node.tryGetContext("previewBranch") as string | undefined;
+new ApplicationStack(app, stackNameForEnvironment(environment, previewBranch), { environment, previewBranch });

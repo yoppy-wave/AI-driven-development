@@ -15,8 +15,7 @@ on:
 
 permissions:
   contents: read
-  issues: write
-  pull-requests: write
+  pull-requests: read
 
 concurrency:
   group: preview-${{ github.event.pull_request.number || github.ref }}
@@ -33,19 +32,17 @@ jobs:
     permissions:
       contents: read
       id-token: write
-      issues: write
-      pull-requests: write
+      pull-requests: read
     uses: ./.github/workflows/reusable-aws-cdk.yml
     with:
       enabled: true
       operation: diff
-      stack-name: ${{ format('app-pr-{0}', github.event.pull_request.number) }}
+      preview-branch: ${{ github.event.pull_request.head.ref }}
       stack-environment: ${{ format('pr-{0}', github.event.pull_request.number) }}
       region: ${{ needs.ci.outputs.cdk-region }}
       github-environment: preview
       source-ref: ${{ github.event.pull_request.head.sha }}
       expected-pr-state: open
-      trusted-workflow-ref: ${{ github.event.pull_request.base.sha }}
     secrets:
       AWS_ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}
 
@@ -55,20 +52,17 @@ jobs:
     permissions:
       contents: read
       id-token: write
-      issues: write
-      pull-requests: write
+      pull-requests: read
     uses: ./.github/workflows/reusable-aws-cdk.yml
     with:
       enabled: true
       operation: deploy
-      stack-name: ${{ format('app-pr-{0}', github.event.pull_request.number) }}
+      preview-branch: ${{ github.event.pull_request.head.ref }}
       stack-environment: ${{ format('pr-{0}', github.event.pull_request.number) }}
       region: ${{ needs.ci.outputs.cdk-region }}
       github-environment: preview
       source-ref: ${{ github.event.pull_request.head.sha }}
       expected-pr-state: open
-      record-preview-cleanup: true
-      trusted-workflow-ref: ${{ github.event.pull_request.base.sha }}
     secrets:
       AWS_ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}
 

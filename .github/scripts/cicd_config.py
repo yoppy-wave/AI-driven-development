@@ -79,7 +79,7 @@ def validate(config: dict[str, object], root: Path = ROOT) -> dict[str, object]:
     return config
 
 
-def values(config: dict[str, object], pull_request: int | None = None, root: Path = ROOT) -> dict[str, str]:
+def values(config: dict[str, object]) -> dict[str, str]:
     application = required_object(config["application"], "application")
     ci = required_object(config["ci"], "ci")
     cdk = required_object(config["cdk"], "cdk")
@@ -94,20 +94,15 @@ def values(config: dict[str, object], pull_request: int | None = None, root: Pat
         "staging_enabled": str(deployments["staging"]).lower(),
         "production_enabled": str(deployments["production"]).lower(),
     }
-    if pull_request is not None:
-        if pull_request < 1:
-            fail("pull request number must be positive")
-        result["preview_stack"] = f"app-pr-{pull_request}"
     return result
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=("validate", "github-output", "json"))
-    parser.add_argument("--pull-request", type=int)
     args = parser.parse_args()
     config = load()
-    output = values(config, args.pull_request)
+    output = values(config)
     if args.command == "validate":
         print("CI/CD configuration is valid.")
     elif args.command == "github-output":
