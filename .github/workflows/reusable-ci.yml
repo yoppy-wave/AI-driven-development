@@ -4,31 +4,169 @@ on:
   workflow_call:
     outputs:
       cdk-enabled:
-        description: Whether AWS CDK operations are enabled by repository configuration.
+        description: Validated cdk-enabled after all quality gates succeed.
         value: ${{ jobs.ci.outputs.cdk-enabled }}
       cdk-region:
-        description: AWS region configured for CDK deployments.
+        description: Validated cdk-region after all quality gates succeed.
         value: ${{ jobs.ci.outputs.cdk-region }}
       preview-environment-enabled:
-        description: Whether PR preview environment updates are enabled.
+        description: Validated preview-environment-enabled after all quality gates succeed.
         value: ${{ jobs.ci.outputs.preview-environment-enabled }}
       development-enabled:
-        description: Whether development deployments are enabled.
+        description: Validated development-enabled after all quality gates succeed.
         value: ${{ jobs.ci.outputs.development-enabled }}
       staging-enabled:
-        description: Whether staging deployments are enabled.
+        description: Validated staging-enabled after all quality gates succeed.
         value: ${{ jobs.ci.outputs.staging-enabled }}
       production-enabled:
-        description: Whether production deployments are enabled.
+        description: Validated production-enabled after all quality gates succeed.
         value: ${{ jobs.ci.outputs.production-enabled }}
 
 permissions:
   contents: read
 
 jobs:
-  ci:
+  test:
+    name: Test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CI: "true"
+    outputs:
+      python-version: ${{ steps.python.outputs.python-version }}
+      node-version: ${{ steps.node.outputs.node-version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Read runtime selectors
+        id: policy
+        run: |
+          python -c 'import json; p=json.load(open(".github/quality/version-policy.json")); print("python="+p["runtimes"]["python"]["series"]); print("node="+p["runtimes"]["node"]["series"])' >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-python@v7
+        id: python
+        with:
+          python-version: ${{ steps.policy.outputs.python }}
+          check-latest: true
+      - uses: actions/setup-node@v7
+        id: node
+        with:
+          node-version: ${{ steps.policy.outputs.node }}
+          check-latest: true
+          cache: npm
+      - name: Run test gate
+        id: check
+        run: |
+          python .github/scripts/run_regression.py
+
+  lint:
+    name: Lint
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      CI: "true"
+    outputs:
+      python-version: ${{ steps.python.outputs.python-version }}
+      node-version: ${{ steps.node.outputs.node-version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Read runtime selectors
+        id: policy
+        run: |
+          python -c 'import json; p=json.load(open(".github/quality/version-policy.json")); print("python="+p["runtimes"]["python"]["series"]); print("node="+p["runtimes"]["node"]["series"])' >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-python@v7
+        id: python
+        with:
+          python-version: ${{ steps.policy.outputs.python }}
+          check-latest: true
+      - uses: actions/setup-node@v7
+        id: node
+        with:
+          node-version: ${{ steps.policy.outputs.node }}
+          check-latest: true
+          cache: npm
+      - name: Run lint gate
+        id: check
+        run: |
+          python .github/scripts/run_lint.py
+
+  dependency:
+    name: Dependency
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CI: "true"
+      GH_TOKEN: ${{ github.token }}
+    outputs:
+      python-version: ${{ steps.python.outputs.python-version }}
+      node-version: ${{ steps.node.outputs.node-version }}
+      required-python: ${{ steps.check.outputs.required-python }}
+      required-node: ${{ steps.check.outputs.required-node }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Read runtime selectors
+        id: policy
+        run: |
+          python -c 'import json; p=json.load(open(".github/quality/version-policy.json")); print("python="+p["runtimes"]["python"]["series"]); print("node="+p["runtimes"]["node"]["series"])' >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-python@v7
+        id: python
+        with:
+          python-version: ${{ steps.policy.outputs.python }}
+          check-latest: true
+      - uses: actions/setup-node@v7
+        id: node
+        with:
+          node-version: ${{ steps.policy.outputs.node }}
+          check-latest: true
+          cache: npm
+      - name: Run dependency gate
+        id: check
+        run: |
+          python .github/scripts/check_dependencies.py
+
+  security:
+    name: Security
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CI: "true"
+    outputs:
+      python-version: ${{ steps.python.outputs.python-version }}
+      node-version: ${{ steps.node.outputs.node-version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Read runtime selectors
+        id: policy
+        run: |
+          python -c 'import json; p=json.load(open(".github/quality/version-policy.json")); print("python="+p["runtimes"]["python"]["series"]); print("node="+p["runtimes"]["node"]["series"])' >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-python@v7
+        id: python
+        with:
+          python-version: ${{ steps.policy.outputs.python }}
+          check-latest: true
+      - uses: actions/setup-node@v7
+        id: node
+        with:
+          node-version: ${{ steps.policy.outputs.node }}
+          check-latest: true
+          cache: npm
+      - name: Run security gate
+        id: check
+        run: |
+          npm ci --ignore-scripts
+          python .github/scripts/check_security.py
+
+  ci:
+    if: always()
+    needs: [test, lint, dependency, security]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     outputs:
       cdk-enabled: ${{ steps.config.outputs.cdk_enabled }}
       cdk-region: ${{ steps.config.outputs.cdk_region }}
@@ -37,37 +175,13 @@ jobs:
       staging-enabled: ${{ steps.config.outputs.staging_enabled }}
       production-enabled: ${{ steps.config.outputs.production_enabled }}
     steps:
-      - name: Check out source
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-          package-manager-cache: false
-
-      - name: Validate CI/CD configuration
+      - name: Require every quality gate and runtime
+        env:
+          QUALITY_RESULTS: ${{ toJSON(needs) }}
+        run: python .github/scripts/quality_gate.py
+      - name: Validate and publish deployment configuration
         id: config
         run: python .github/scripts/cicd_config.py github-output >> "$GITHUB_OUTPUT"
-
-      - name: Run regression suites
-        run: python .github/scripts/run_regression.py
-
-      - name: Publish CI summary
-        run: |
-          {
-            echo '## CI/CD configuration'
-            echo
-            echo "- AWS CDK: \\`${{ steps.config.outputs.cdk_enabled }}\\`"
-            echo "- Preview Environment: \\`${{ steps.config.outputs.preview_environment_enabled }}\\`"
-            echo "- Development deployment: \\`${{ steps.config.outputs.development_enabled }}\\`"
-            echo "- Staging deployment: \\`${{ steps.config.outputs.staging_enabled }}\\`"
-            echo "- Production deployment: \\`${{ steps.config.outputs.production_enabled }}\\`"
-          } >> "$GITHUB_STEP_SUMMARY"

@@ -58,10 +58,10 @@ npm run synth
 
 ```bash
 npm ci
-python -m pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev.lock
 ```
 
-CIは全ブランチへのpushで回帰テストを実行し、`stg`または`prod`宛てPRではPRポリシーも検証します。回帰テストは、検出したPython・Node.jsプロジェクトのテストを実行し、設定がある場合はNode.jsの`lint`、`typecheck`、`build`、`synth`も実行します。テストが期待する振る舞いを十分に表しているかは、CI成功だけでなくレビューでも確認します。
+CIは全ブランチへのpushとPRでTest・Lint・Dependency・Securityを並列実行します。Testでは検出したPython・Node.jsプロジェクトのテスト、型チェック、build、synthを実行し、Lintは独立したゲートで検証します。全ゲート成功後だけ後続処理へ進みます。`stg`または`prod`宛てPRのPRポリシーも維持します。ランタイムの3日ルール、固定依存、Securityの検出範囲、ローカル実行方法は[CI品質ゲート](ci-quality-gates.md)を参照してください。テストが期待する振る舞いを十分に表しているかは、CI成功だけでなくレビューでも確認します。
 
 ## IssueからAIを利用する
 

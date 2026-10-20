@@ -51,7 +51,8 @@ def discover(root: Path) -> tuple[list[Path], list[Path]]:
             raise RuntimeError(f"Python project {project} has no *_test.py tests")
     for project in node_roots:
         package = json.loads((root / project / "package.json").read_text(encoding="utf-8"))
-        if not isinstance(package.get("scripts", {}).get("test"), str):
+        test_script = package.get("scripts", {}).get("test")
+        if not isinstance(test_script, str) or not test_script.strip():
             raise RuntimeError(f"Node project {project} has no test script")
     for path in files:
         if path.suffix == ".py" and nearest_project(path, python_roots) is None:
@@ -69,7 +70,7 @@ def run(command: list[str], cwd: Path) -> None:
         print("::endgroup::", flush=True)
 
 
-def python_project(root: Path, project: Path) -> None:
+def install_python(root: Path, project: Path) -> None:
     directory = root / project
     pyproject = directory / "pyproject.toml"
     if pyproject.exists():
@@ -79,29 +80,42 @@ def python_project(root: Path, project: Path) -> None:
             extra = next((name for name in ("test", "dev") if name in extras), None)
             target = f".[{extra}]" if extra else "."
             run([sys.executable, "-m", "pip", "install", "-e", target], directory)
-    requirements = next((directory / name for name in ("requirements-dev.txt", "requirements.txt")
+    requirements = next((directory / name for name in ("requirements-dev.lock", "requirements-dev.txt", "requirements.txt")
                          if (directory / name).exists()), None)
     if requirements:
         run([sys.executable, "-m", "pip", "install", "-r", requirements.name], directory)
-    run([sys.executable, "-m", "pytest", "-q"], directory)
 
 
-def node_project(root: Path, project: Path) -> None:
+def python_project(root: Path, project: Path) -> None:
+    install_python(root, project)
+    run([sys.executable, "-m", "pytest", "-q"], root / project)
+
+
+def install_node(root: Path, project: Path, ignore_scripts: bool = False) -> list[str]:
     directory = root / project
-    package = json.loads((directory / "package.json").read_text(encoding="utf-8"))
     locks = [name for name in ("package-lock.json", "pnpm-lock.yaml", "yarn.lock")
              if (directory / name).exists()]
     if len(locks) != 1:
         raise RuntimeError(f"Node project {project} needs exactly one supported lockfile")
     if locks[0] == "package-lock.json":
         manager = ["npm"]
-        run(["npm", "ci"], directory)
+        run(["npm", "ci", *(["--ignore-scripts"] if ignore_scripts else [])], directory)
     else:
         manager = ["corepack", "pnpm" if locks[0] == "pnpm-lock.yaml" else "yarn"]
         run([*manager, "install", "--frozen-lockfile" if manager[-1] == "pnpm" else "--immutable"], directory)
-    for name in ("test", "lint", "typecheck", "build", "synth"):
-        if name in package.get("scripts", {}):
+    return manager
+
+
+def node_project(root: Path, project: Path) -> None:
+    directory = root / project
+    package = json.loads((directory / "package.json").read_text(encoding="utf-8"))
+    manager = install_node(root, project)
+    executed = set()
+    for name in ("test", "typecheck", "build", "synth"):
+        script = package.get("scripts", {}).get(name)
+        if script and script not in executed:
             run([*manager, "run", name], directory)
+            executed.add(script)
 
 
 def main() -> None:

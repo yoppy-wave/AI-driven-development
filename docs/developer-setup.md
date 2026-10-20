@@ -114,7 +114,7 @@ APIキーはClineの設定画面など、個人の安全な認証領域へ入力
 
 ```bash
 npm ci
-python -m pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev.lock
 npm run typecheck
 npm test
 python -m pytest
@@ -140,6 +140,6 @@ npm run synth
 - [ ] コンテナ内でPython 3.12系、Node.js 24系、Git、GitHub CLIを確認できた
 - [ ] Gitの表示名・メールアドレスを設定し、`gh auth status`でGitHub認証を確認した
 - [ ] Clineなど利用するAIツールの個人認証を完了し、認証情報をリポジトリへ保存していない
-- [ ] `npm ci`と`python -m pip install -r requirements-dev.txt`が成功した
+- [ ] `npm ci`と`python -m pip install -r requirements-dev.lock`が成功した
 - [ ] `npm run typecheck`、`npm test`、`python -m pytest`、`npm run synth`が成功した
 - [ ] 必要なプロキシ、VPN、証明書、通信許可を確認した

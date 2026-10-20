@@ -4,7 +4,6 @@ on:
   pull_request:
     types: [opened, reopened, synchronize]
   push:
-    branches: [main, stg, prod]
   workflow_dispatch:
     inputs:
       environment:
@@ -25,6 +24,14 @@ concurrency:
 jobs:
   ci:
     uses: ./.github/workflows/reusable-ci.yml
+
+  regression:
+    name: Regression tests
+    if: always()
+    needs: ci
+    uses: ./.github/workflows/regression.yml
+    with:
+      quality-result: ${{ needs.ci.result }}
 
   preview:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) && needs.ci.outputs.cdk-enabled == 'true'
