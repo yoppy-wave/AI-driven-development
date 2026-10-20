@@ -29,3 +29,6 @@ cdk.out/
 .DS_Store
 Thumbs.db
 *.log
+*.log.[0-9]*
+# Defensive exclusions if local proxy state/logs are copied into the workspace.
+.devcontainer/squid/.local/
