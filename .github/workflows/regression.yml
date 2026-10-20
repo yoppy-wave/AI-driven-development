@@ -1,39 +1,27 @@
 name: Regression tests
 
 on:
-  push:
-  pull_request:
-    branches: [stg, prod]
+  workflow_call:
+    inputs:
+      quality-result:
+        description: Result of the four-gate CI workflow.
+        required: true
+        type: string
 
 permissions:
   contents: read
 
-concurrency:
-  group: regression-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   regression:
+    if: always()
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    env:
-      CI: 'true'
+    timeout-minutes: 5
     steps:
-      - name: Check out the pushed commit
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-          package-manager-cache: false
-
-      - name: Run regression suites
-        run: python .github/scripts/run_regression.py
+      - name: Preserve required regression check
+        env:
+          QUALITY_RESULT: ${{ inputs.quality-result }}
+        run: |
+          if [[ "$QUALITY_RESULT" != success ]]; then
+            echo "Quality gates did not all succeed: $QUALITY_RESULT" >&2
+            exit 1
+          fi

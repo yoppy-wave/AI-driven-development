@@ -79,7 +79,7 @@ Rulesetの必須チェックには、次のcheck contextを指定します。
 | `Regression tests / regression` | `.github/workflows/regression.yml` |
 | `Pull request policy / validate` | `.github/workflows/pull-request-policy.yml` |
 
-回帰テストは全ブランチへのpush、および`stg`または`prod`宛てPRで実行されます。PRポリシーは、`prod`宛てを同一リポジトリの`stg`からだけ、`stg`宛てを`feature/*`または`fix/*`からだけ許可します。workflow名またはjob IDを変えた場合は、Ruleset側の必須チェックも更新します。
+品質ゲートは全ブランチへのpushとPRで実行されます。Test・Lint・Dependency・Securityを並列実行し、`ci / ci`で集約します。Rulesets用の`Regression tests / regression`は同じ集約結果を検証する互換チェックとして維持します。詳しくは[CI品質ゲート](ci-quality-gates.md)を参照してください。PRポリシーは、`prod`宛てを同一リポジトリの`stg`からだけ、`stg`宛てを`feature/*`または`fix/*`からだけ許可します。
 
 ## 3. GitHub Actions、AI Issueワークフロー、Secrets
 

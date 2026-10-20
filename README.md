@@ -14,7 +14,7 @@ Dev Container内で初回検証を行う場合は、次を実行します。
 
 ```bash
 npm ci
-python -m pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev.lock
 npm run typecheck
 npm test
 python -m pytest

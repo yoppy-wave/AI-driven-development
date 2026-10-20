@@ -1,8 +1,11 @@
 """Regression checks for run_regression helpers."""
 
 import tempfile
+import subprocess
+import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import run_regression
 
@@ -40,6 +43,9 @@ class DiscoveryTests(unittest.TestCase):
         self.write("web/package.json", '{"scripts":{"build":"tsc"}}')
         with self.assertRaisesRegex(RuntimeError, "no test script"):
             run_regression.discover(self.root)
+        self.write("web/package.json", '{"scripts":{"test":" "}}')
+        with self.assertRaisesRegex(RuntimeError, "no test script"):
+            run_regression.discover(self.root)
         self.write("web/package.json", '{"scripts":{"test":"vitest run"}}')
         self.write("web/src/app.ts", "export const app = true")
         self.assertEqual(run_regression.discover(self.root)[1], [Path("web")])
@@ -49,6 +55,23 @@ class DiscoveryTests(unittest.TestCase):
         self.write("packages/web/package.json", '{"scripts":{"test":"vitest run"}}')
         self.write("packages/web/src/app.ts", "export const app = true")
         self.assertEqual(run_regression.discover(self.root)[1], [Path(".")])
+
+    def test_failed_test_command_propagates_failure(self) -> None:
+        with patch.object(run_regression.subprocess, "run", side_effect=subprocess.CalledProcessError(1, "pytest")):
+            with self.assertRaises(subprocess.CalledProcessError):
+                run_regression.run(["pytest"], self.root)
+
+    def test_intentionally_failing_pytest_returns_failure(self) -> None:
+        self.write("failure_test.py", "def test_failure():\n    assert False\n")
+        result = subprocess.run([sys.executable, "-m", "pytest", "-q", str(self.root / "failure_test.py")], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("1 failed", result.stdout)
+
+    def test_node_test_gate_excludes_lint_and_deduplicates_typecheck_build(self) -> None:
+        self.write("package.json", '{"scripts":{"test":"jest", "lint":"eslint .", "typecheck":"tsc --noEmit", "build":"tsc --noEmit", "synth":"cdk synth"}}')
+        with patch.object(run_regression, "install_node", return_value=["npm"]), patch.object(run_regression, "run") as run:
+            run_regression.node_project(self.root, Path("."))
+        self.assertEqual([call.args[0] for call in run.call_args_list], [["npm", "run", "test"], ["npm", "run", "typecheck"], ["npm", "run", "synth"]])
 
 
 if __name__ == "__main__":
