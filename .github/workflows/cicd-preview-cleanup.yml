@@ -6,8 +6,7 @@ on:
 
 permissions:
   contents: read
-  issues: write
-  pull-requests: write
+  pull-requests: read
 
 concurrency:
   group: preview-${{ github.event.pull_request.number }}
@@ -18,131 +17,86 @@ jobs:
   cleanup-target:
     runs-on: ubuntu-24.04
     outputs:
-      found: ${{ steps.target.outputs.found }}
-      stack-name: ${{ steps.target.outputs.stack_name }}
-      region: ${{ steps.target.outputs.region }}
-      source-ref: ${{ steps.target.outputs.source_ref }}
-      workflow-ref: ${{ steps.target.outputs.workflow_ref }}
-      account-id: ${{ steps.target.outputs.account_id }}
-      comment-id: ${{ steps.target.outputs.comment_id }}
+      enabled: ${{ steps.config.outputs.preview_environment_enabled }}
+      region: ${{ steps.config.outputs.cdk_region }}
+      management-ref: ${{ steps.management.outputs.commit }}
       cleanup-allowed: ${{ steps.current-pr.outputs.allowed }}
     steps:
       - name: Check out protected default-branch cleanup helper
+        id: management
         uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
-          fetch-depth: 0
           persist-credentials: false
-      - name: Recover recorded preview cleanup target
-        id: target
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api --paginate --slurp "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
-            | python .github/scripts/preview_cleanup.py github-output --pull-request '${{ github.event.pull_request.number }}' \
-            >> "$GITHUB_OUTPUT"
-      - name: Verify recorded cleanup helper is trusted
-        if: steps.target.outputs.found == 'true'
-        env:
-          WORKFLOW_REF: ${{ steps.target.outputs.workflow_ref }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          git fetch --no-tags origin "$DEFAULT_BRANCH"
-          git merge-base --is-ancestor "$WORKFLOW_REF" "origin/$DEFAULT_BRANCH"
+      - name: Read trusted CI/CD configuration
+        id: config
+        run: python .github/scripts/cicd_config.py github-output >> "$GITHUB_OUTPUT"
       - name: Confirm pull request remains closed
         id: current-pr
+        if: steps.config.outputs.preview_environment_enabled == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          state="$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}" --jq .state)"
+          state="$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER" --jq .state)"
           if [[ "$state" == closed ]]; then
             echo 'allowed=true' >> "$GITHUB_OUTPUT"
           else
             echo 'allowed=false' >> "$GITHUB_OUTPUT"
           fi
   cleanup:
-    if: needs.cleanup-target.outputs.found == 'true' && needs.cleanup-target.outputs.cleanup-allowed == 'true'
+    if: needs.cleanup-target.outputs.enabled == 'true' && needs.cleanup-target.outputs.cleanup-allowed == 'true'
     needs: cleanup-target
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
+      pull-requests: read
       id-token: write
-      issues: write
-      pull-requests: write
     environment:
       name: preview
     steps:
-      - name: Check out protected default-branch cleanup helper
+      - name: Check out trusted default-branch management revision
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.repository.default_branch }}
-          fetch-depth: 0
+          ref: ${{ needs.cleanup-target.outputs.management-ref }}
           persist-credentials: false
+      - name: Set up Node.js for shared stack naming
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Resolve preview stack from branch
+        env:
+          PREVIEW_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: python .github/scripts/preview_cleanup.py stack-name --branch "$PREVIEW_BRANCH"
+      - name: Confirm pull request remains closed before AWS authentication
+        id: current-pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          state="$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER" --jq .state)"
+          if [[ "$state" == closed ]]; then
+            echo 'allowed=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'allowed=false' >> "$GITHUB_OUTPUT"
+          fi
       - name: Configure AWS credentials with OIDC
+        if: steps.current-pr.outputs.allowed == 'true'
         uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ needs.cleanup-target.outputs.region }}
-      - name: Verify CloudFormation cleanup target
-        id: target
+      - name: Validate and delete preview stack, or wait for existing deletion
+        if: steps.current-pr.outputs.allowed == 'true'
         env:
-          EXPECTED_ACCOUNT_ID: ${{ needs.cleanup-target.outputs.account-id }}
-          STACK_NAME: ${{ needs.cleanup-target.outputs.stack-name }}
-          REGION: ${{ needs.cleanup-target.outputs.region }}
+          GH_TOKEN: ${{ github.token }}
+          AWS_ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          PREVIEW_BRANCH: ${{ github.event.pull_request.head.ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          REGION: ${{ needs.cleanup-target.outputs.region }}
         run: |
-          [[ "$STACK_NAME" == "app-pr-$PR_NUMBER" ]]
-          account_id="$(aws sts get-caller-identity --query Account --output text)"
-          [[ -z "$EXPECTED_ACCOUNT_ID" || "$EXPECTED_ACCOUNT_ID" == "$account_id" ]]
-          if ! stack="$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" 2>/tmp/describe-error)"; then
-            if grep -q 'does not exist' /tmp/describe-error; then
-              echo 'exists=false' >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            cat /tmp/describe-error >&2
-            exit 1
-          fi
-          status="$(jq -r '.Stacks[0].StackStatus' <<<"$stack")"
-          if [[ "$status" == DELETE_COMPLETE ]]; then
-            echo 'exists=false' >> "$GITHUB_OUTPUT"
-            echo 'completed=true' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [[ "$status" == DELETE_IN_PROGRESS ]]; then
-            echo 'exists=false' >> "$GITHUB_OUTPUT"
-            echo 'deleting=true' >> "$GITHUB_OUTPUT"
-            echo 'completed=false' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          jq -e --arg pr "$PR_NUMBER" '.Stacks[0].Tags | any(.Key == "app:managed-by" and .Value == "ai-driven-development") and any(.Key == "app:preview-pr" and .Value == $pr)' <<<"$stack" >/dev/null
-          echo 'exists=true' >> "$GITHUB_OUTPUT"
-          echo 'deleting=false' >> "$GITHUB_OUTPUT"
-          echo 'completed=false' >> "$GITHUB_OUTPUT"
-      - name: Mark cleanup target destroying
-        if: steps.target.outputs.exists == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          body="$(python .github/scripts/preview_cleanup.py update-body --pull-request '${{ github.event.pull_request.number }}' --stack-name '${{ needs.cleanup-target.outputs.stack-name }}' --region '${{ needs.cleanup-target.outputs.region }}' --source-ref '${{ needs.cleanup-target.outputs.source-ref }}' --workflow-ref '${{ needs.cleanup-target.outputs.workflow-ref }}' --account-id '${{ needs.cleanup-target.outputs.account-id }}' --status destroying)"
-          gh api --method PATCH "repos/${{ github.repository }}/issues/comments/${{ needs.cleanup-target.outputs.comment-id }}" -f body="$body"
-      - name: Confirm pull request remains closed before deletion
-        if: steps.target.outputs.exists == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: test "$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}" --jq .state)" = closed
-      - name: Delete preview CloudFormation stack
-        if: steps.target.outputs.exists == 'true'
-        run: |
-          aws cloudformation delete-stack --stack-name '${{ needs.cleanup-target.outputs.stack-name }}' --region '${{ needs.cleanup-target.outputs.region }}'
-          aws cloudformation wait stack-delete-complete --stack-name '${{ needs.cleanup-target.outputs.stack-name }}' --region '${{ needs.cleanup-target.outputs.region }}'
-      - name: Wait for in-progress preview stack deletion
-        if: steps.target.outputs.deleting == 'true'
-        run: aws cloudformation wait stack-delete-complete --stack-name '${{ needs.cleanup-target.outputs.stack-name }}' --region '${{ needs.cleanup-target.outputs.region }}'
-      - name: Mark cleanup target destroyed
-        if: steps.target.outputs.exists == 'true' || steps.target.outputs.deleting == 'true' || steps.target.outputs.completed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          body="$(python .github/scripts/preview_cleanup.py update-body --pull-request '${{ github.event.pull_request.number }}' --stack-name '${{ needs.cleanup-target.outputs.stack-name }}' --region '${{ needs.cleanup-target.outputs.region }}' --source-ref '${{ needs.cleanup-target.outputs.source-ref }}' --workflow-ref '${{ needs.cleanup-target.outputs.workflow-ref }}' --account-id '${{ needs.cleanup-target.outputs.account-id }}' --status destroyed)"
-          gh api --method PATCH "repos/${{ github.repository }}/issues/comments/${{ needs.cleanup-target.outputs.comment-id }}" -f body="$body"
+          python .github/scripts/preview_cleanup.py cleanup \
+            --branch "$PREVIEW_BRANCH" --pull-request "$PR_NUMBER" \
+            --region "$REGION" --repository "${{ github.repository }}"

@@ -49,8 +49,8 @@ class CicdConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "cdk.json"):
             cicd_config.load(self.config_path)
 
-    def test_preview_stack_name_is_fixed_to_app_namespace(self) -> None:
-        self.assertEqual(cicd_config.values(self.valid(), 42)["preview_stack"], "app-pr-42")
+    def test_configuration_does_not_generate_pr_number_stack_names(self) -> None:
+        self.assertNotIn("preview_stack", cicd_config.values(self.valid()))
 
     def test_application_name_cannot_drift_from_stack_namespace(self) -> None:
         config = self.valid()

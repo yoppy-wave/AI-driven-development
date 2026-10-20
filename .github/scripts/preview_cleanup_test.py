@@ -1,63 +1,214 @@
-"""Tests for immutable, stateful AWS PR preview cleanup records."""
+"""Preview management tests use real shared naming and mocked AWS/GitHub calls."""
 
+import copy
+import json
 import unittest
+from unittest.mock import patch
 
-import preview_cleanup
+import preview_cleanup as preview
 
-SHA_A = "a" * 40
-SHA_B = "b" * 40
+REGION = "us-east-1"
+ACCOUNT = "123456789012"
+ROLE = f"arn:aws:iam::{ACCOUNT}:role/preview"
+BRANCH = "feature/Add_Login"
+NAME = "app-feature-add-login"
+STACK_ID = f"arn:aws:cloudformation:{REGION}:{ACCOUNT}:stack/{NAME}/unique-id"
 
 
 class PreviewCleanupTests(unittest.TestCase):
-    def values(self, pull_request: int = 42, **overrides: str) -> dict[str, str]:
-        values = {"stack_name": f"app-pr-{pull_request}", "region": "us-east-1", "source_ref": SHA_A, "workflow_ref": SHA_B, "account_id": "123456789012", "status": "pending"}
-        values.update(overrides)
-        return preview_cleanup.metadata(pull_request, **values)
+    def setUp(self) -> None:
+        self.stack = {
+            "StackName": NAME, "StackId": STACK_ID, "StackStatus": "UPDATE_COMPLETE",
+            "Tags": [{"Key": "app:managed-by", "Value": preview.MANAGED_BY},
+                     {"Key": "app:preview-pr", "Value": "42"}],
+        }
+        self.calls = []
+        self.identity = ACCOUNT
+        self.describe_error = None
+        self.aws_mock = self.enterContext(patch.object(preview, "aws", side_effect=self.aws))
+        self.closed = self.enterContext(patch.object(preview, "remains_closed", return_value=True))
 
-    def comment(self, values: dict[str, str], comment_id: int = 1, login: str = preview_cleanup.BOT_LOGIN) -> dict[str, object]:
-        return {"id": comment_id, "body": preview_cleanup.comment_body(values), "user": {"login": login}}
+    def aws(self, region, *arguments):
+        self.calls.append((region, *arguments))
+        self.assertEqual(region, REGION)
+        if arguments == ("sts", "get-caller-identity"):
+            return json.dumps({"Account": self.identity})
+        if arguments[:2] == ("cloudformation", "describe-stacks"):
+            self.assertEqual(arguments[3], NAME)
+            if self.describe_error:
+                raise RuntimeError(self.describe_error)
+            return json.dumps({"Stacks": [copy.deepcopy(self.stack)]})
+        return "{}"
 
-    def test_new_pending_record_prevents_cleanup_of_an_old_active_preview(self) -> None:
-        old = self.values(status="active")
-        current = self.values(source_ref=SHA_B, status="pending")
-        self.assertEqual(preview_cleanup.latest_target([self.comment(old), self.comment(current, 2)], 42), {**current, "comment_id": "2"})
+    def manage(self, command="cleanup", branch=BRANCH, pr=42, region=REGION, role=ROLE):
+        preview.manage(command, branch, pr, region, role, "owner/repo")
 
-    def test_destroyed_record_is_not_selected(self) -> None:
-        self.assertIsNone(preview_cleanup.latest_target([self.comment(self.values(status="destroyed"))], 42))
+    def mutations(self):
+        return [call for call in self.calls if call[1:3] == ("cloudformation", "delete-stack")]
 
-    def test_latest_destroyed_record_prevents_reusing_a_previous_active_target(self) -> None:
-        active = self.values(status="active")
-        destroyed = self.values(source_ref=SHA_B, status="destroyed")
-        self.assertIsNone(preview_cleanup.latest_target([self.comment(active), self.comment(destroyed, 2)], 42))
+    def waits(self):
+        return [call for call in self.calls if call[1:4] == ("cloudformation", "wait", "stack-delete-complete")]
 
-    def test_latest_record_supports_cleanup_retry_after_a_failed_destroy(self) -> None:
-        destroying = self.values(status="destroying")
-        self.assertEqual(
-            preview_cleanup.latest_target([self.comment(destroying, 3)], 42),
-            {**destroying, "comment_id": "3"},
-        )
+    def test_normalizes_branches_with_the_same_function_as_cdk(self):
+        for branch, expected in [
+            (BRANCH, NAME), ("fix/API_Error", "app-fix-api-error"),
+            ("--A__B--", "app-a--b"),
+            ("a" * 40, "app-" + "a" * 30),
+            ("a" * 29 + "/rest", "app-" + "a" * 29),
+            ("a" * 28 + "//rest", "app-" + "a" * 28),
+            ("日本語/Feature", "app-feature"),
+            ("a😀b", "app-a-b"),
+        ]:
+            with self.subTest(branch=branch):
+                self.assertEqual(preview.preview_stack_name(branch), expected)
 
-    def test_latest_pending_record_is_selected_after_a_redeployment(self) -> None:
-        active = self.values(status="active")
-        pending = self.values(source_ref=SHA_B, status="pending")
-        self.assertEqual(
-            preview_cleanup.latest_target([self.comment(active), self.comment(pending, 4)], 42),
-            {**pending, "comment_id": "4"},
-        )
+    def test_empty_and_shared_names_are_rejected_before_aws(self):
+        for command in ("verify", "cleanup"):
+            for branch in ("", "---", "日本語", "Development", "-staging-", "PRODUCTION", "development" + "-" * 30 + "x"):
+                with self.subTest(command=command, branch=branch), self.assertRaises(RuntimeError):
+                    self.manage(command, branch)
+        self.aws_mock.assert_not_called()
 
-    def test_rejects_untrusted_wrong_stack_or_invalid_account_metadata(self) -> None:
-        self.assertIsNone(preview_cleanup.latest_target([self.comment(self.values(), login="contributor")], 42))
-        with self.assertRaisesRegex(ValueError, "exactly match"):
-            self.values(stack_name="app-development")
-        with self.assertRaisesRegex(ValueError, "12-digit"):
-            self.values(account_id="123")
+    def test_same_branch_updates_and_cleanup_resolve_same_stack(self):
+        self.manage("verify")
+        self.manage("verify")
+        self.manage("cleanup")
+        describes = [call[4] for call in self.calls if call[1:3] == ("cloudformation", "describe-stacks")]
+        self.assertEqual(describes, [NAME] * 3)
+        self.assertEqual(self.mutations(), [(REGION, "cloudformation", "delete-stack", "--stack-name", STACK_ID)])
+        self.assertEqual(self.waits(), [(REGION, "cloudformation", "wait", "stack-delete-complete", "--stack-name", STACK_ID)])
 
-    def test_requires_immutable_source_and_trusted_workflow_revisions(self) -> None:
-        with self.assertRaisesRegex(ValueError, "source_ref"):
-            self.values(source_ref="main")
-        with self.assertRaisesRegex(ValueError, "workflow_ref"):
-            self.values(workflow_ref="main")
+    def test_missing_stack_is_successful_for_create_and_cleanup(self):
+        self.describe_error = f"An error occurred (ValidationError): Stack with id {NAME} does not exist"
+        self.manage("verify")
+        self.manage("cleanup")
+        self.assertFalse(self.mutations())
+        self.assertFalse(self.waits())
 
-    def test_flattens_paginated_comment_responses(self) -> None:
-        values = self.values()
-        self.assertEqual(preview_cleanup.comment_pages([[self.comment(values)], []]), [self.comment(values)])
+    def test_cloudformation_errors_are_not_mistaken_for_missing_stack(self):
+        for error in ("AccessDenied: does not exist", "(ValidationError): something else"):
+            self.describe_error = error
+            with self.assertRaises(RuntimeError):
+                self.manage()
+        self.assertFalse(self.mutations())
+
+    def test_different_pr_collision_prevents_both_update_and_deletion(self):
+        for branch in (BRANCH, "FEATURE-add-login"):
+            for command in ("verify", "cleanup"):
+                with self.subTest(command=command, branch=branch), self.assertRaisesRegex(ValueError, "another PR"):
+                    self.manage(command, branch, pr=99)
+        self.assertFalse(self.mutations())
+        self.assertFalse(self.waits())
+
+    def test_truncation_collision_also_rejects_another_pr(self):
+        first = "a" * 30 + "/first"
+        second = "a" * 30 + "/second"
+        name = preview.preview_stack_name(first)
+        self.assertEqual(name, preview.preview_stack_name(second))
+        self.stack["StackName"] = name
+        self.stack["StackId"] = STACK_ID.replace(NAME, name)
+        with patch.object(preview, "describe_stack", return_value=self.stack):
+            for command in ("verify", "cleanup"):
+                with self.assertRaisesRegex(ValueError, "another PR"):
+                    self.manage(command, second, pr=99)
+        self.assertFalse(self.mutations())
+
+    def test_unmanaged_or_incorrect_tags_prevent_update_and_delete(self):
+        for tags in ([], [{"Key": "app:preview-pr", "Value": "42"}],
+                     [{"Key": "app:managed-by", "Value": "other"}, {"Key": "app:preview-pr", "Value": "42"}]):
+            self.stack["Tags"] = tags
+            for command in ("verify", "cleanup"):
+                with self.subTest(tags=tags, command=command), self.assertRaisesRegex(ValueError, "unmanaged"):
+                    self.manage(command)
+        self.assertFalse(self.mutations())
+
+    def test_delete_in_progress_validates_tags_and_only_waits(self):
+        self.stack["StackStatus"] = "DELETE_IN_PROGRESS"
+        self.manage()
+        self.assertFalse(self.mutations())
+        self.assertEqual(len(self.waits()), 1)
+        self.stack["Tags"] = []
+        with self.assertRaisesRegex(ValueError, "unmanaged"):
+            self.manage()
+        self.assertEqual(len(self.waits()), 1)
+
+    def test_verify_refuses_to_deploy_during_or_after_failed_deletion(self):
+        for status in ("DELETE_IN_PROGRESS", "DELETE_FAILED", "DELETE_COMPLETE"):
+            self.stack["StackStatus"] = status
+            with self.assertRaisesRegex(ValueError, "deleted"):
+                self.manage("verify")
+        self.assertFalse(self.mutations())
+
+    def test_delete_failed_can_be_retried_and_delete_complete_is_a_noop(self):
+        self.stack["StackStatus"] = "DELETE_FAILED"
+        self.manage()
+        self.assertEqual(len(self.mutations()), 1)
+        self.assertEqual(len(self.waits()), 1)
+        self.stack["StackStatus"] = "DELETE_COMPLETE"
+        self.manage()
+        self.assertEqual(len(self.mutations()), 1)
+        self.assertEqual(len(self.waits()), 1)
+
+    def test_reopened_pr_skips_aws_entirely(self):
+        self.closed.return_value = False
+        self.manage()
+        self.aws_mock.assert_not_called()
+
+    def test_pr_reopened_during_inspection_is_not_deleted(self):
+        self.closed.side_effect = [True, False]
+        self.manage()
+        self.assertFalse(self.mutations())
+        self.assertFalse(self.waits())
+
+    def test_account_region_and_stack_identity_must_match(self):
+        self.identity = "999999999999"
+        with self.assertRaisesRegex(ValueError, "AWS account"):
+            self.manage()
+        self.identity = ACCOUNT
+        for field, value in (
+            ("StackName", "app-production"),
+            ("StackId", STACK_ID.replace(REGION, "eu-west-1")),
+            ("StackId", STACK_ID.replace(ACCOUNT, "999999999999")),
+            ("StackId", STACK_ID.replace(NAME, "app-other")),
+        ):
+            original = self.stack[field]
+            self.stack[field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                self.manage()
+            self.stack[field] = original
+        self.assertFalse(self.mutations())
+
+    def test_invalid_pr_region_and_role_fail_before_aws(self):
+        for overrides in ({"pr": 0}, {"region": "bad"}, {"role": ""}, {"role": "arn:aws:iam::123:role/x"}):
+            with self.subTest(overrides=overrides), self.assertRaises(ValueError):
+                self.manage(**overrides)
+        self.aws_mock.assert_not_called()
+
+    def test_wait_and_delete_failures_propagate(self):
+        original = self.aws
+        for failing_command in ("delete-stack", "wait"):
+            def fail(region, *arguments):
+                if arguments[1] == failing_command:
+                    raise RuntimeError("AWS failure")
+                return original(region, *arguments)
+            self.aws_mock.side_effect = fail
+            with self.subTest(command=failing_command), self.assertRaisesRegex(RuntimeError, "AWS failure"):
+                self.manage()
+
+    def test_shared_stack_is_rejected_even_with_preview_tags(self):
+        with self.assertRaisesRegex(ValueError, "shared"):
+            preview.validate_stack(self.stack, "app-production", REGION, "aws", ACCOUNT, 42)
+
+
+class PullRequestStateTests(unittest.TestCase):
+    def test_closed_open_and_renamed_pr(self):
+        for state, branch, expected in (("closed", BRANCH, True), ("open", BRANCH, False),
+                                        ("closed", "renamed", False)):
+            with patch.object(preview, "run", return_value=json.dumps({"state": state, "head": {"ref": branch}})) as run:
+                self.assertEqual(preview.remains_closed("owner/repo", 42, BRANCH), expected)
+                run.assert_called_once_with(["gh", "api", "repos/owner/repo/pulls/42"])
+
+    def test_github_api_failure_is_not_treated_as_closed(self):
+        with patch.object(preview, "run", side_effect=RuntimeError("GitHub unavailable")):
+            with self.assertRaises(RuntimeError):
+                preview.remains_closed("owner/repo", 42, BRANCH)

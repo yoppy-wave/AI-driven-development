@@ -3,25 +3,34 @@ import * as apigateway from "aws-cdk-lib/aws-apigateway";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import { Construct } from "constructs";
+import { previewStackName } from "./preview-stack-name.cjs";
 
 const APPLICATION_NAME = "app";
 const SHARED_ENVIRONMENTS = new Set(["development", "staging", "production"]);
 
-export function stackNameForEnvironment(environment: string): string {
-  if (SHARED_ENVIRONMENTS.has(environment) || /^pr-[1-9][0-9]*$/.test(environment)) {
+export function stackNameForEnvironment(environment: string, previewBranch?: string): string {
+  if (SHARED_ENVIRONMENTS.has(environment)) {
     return `${APPLICATION_NAME}-${environment}`;
   }
-  throw new Error("environment must be development, staging, production, or pr-<positive number>");
+  if (/^pr-[1-9][0-9]*$/.test(environment) && previewBranch !== undefined) {
+    return previewStackName(previewBranch);
+  }
+  throw new Error("environment must be development, staging, production, or pr-<positive number> with previewBranch");
 }
 
 export interface ApplicationStackProps extends cdk.StackProps {
   readonly environment: string;
+  readonly previewBranch?: string;
   readonly lambdaAssetPath?: string;
 }
 
 export class ApplicationStack extends cdk.Stack {
   public constructor(scope: Construct, id: string, props: ApplicationStackProps) {
-    super(scope, id, props);
+    const stackName = stackNameForEnvironment(props.environment, props.previewBranch);
+    if (props.stackName !== undefined && props.stackName !== stackName) {
+      throw new Error("stackName does not match the environment/preview branch");
+    }
+    super(scope, id, { ...props, stackName });
 
     cdk.Tags.of(this).add("app:managed-by", "ai-driven-development");
     cdk.Tags.of(this).add("app:environment", props.environment);
